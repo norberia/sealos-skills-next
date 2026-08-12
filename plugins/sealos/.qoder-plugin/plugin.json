@@ -1,0 +1,20 @@
+{
+  "name": "sealos",
+  "version": "0.1.0",
+  "displayName": "Sealos",
+  "description": "Sealos agent skills for deploying, configuring, monitoring, and troubleshooting apps on Sealos Cloud from Qoder. Deploy from the template store, official Docker images, or project source; manage databases, object storage, networking, and logs.",
+  "author": {
+    "name": "Sealos",
+    "email": "contact@sealos.io"
+  },
+  "homepage": "https://sealos.io",
+  "repository": "https://github.com/labring/sealos-skills-next",
+  "license": "MIT",
+  "keywords": [
+    "sealos",
+    "deployment",
+    "kubernetes",
+    "self-hosted",
+    "agent-skills"
+  ]
+}

@@ -13,6 +13,7 @@ deploy path, databases, storage, public HTTPS, and post-deploy verification.
 plugins/sealos/
 ├── .claude-plugin/plugin.json      # Claude Code manifest
 ├── .cursor-plugin/plugin.json      # Cursor manifest
+├── .qoder-plugin/plugin.json       # Qoder manifest
 └── skills/use-sealos/
     ├── SKILL.md                    # intent router + execution rules
     ├── references/                 # loaded on demand
@@ -56,6 +57,24 @@ the repo is published.
 
 Add this repository (URL or local path) as a marketplace source under
 **Plugins → More → Add more**. Manifest: `.agents/plugins/marketplace.json`.
+
+### Qoder
+
+Add this repository as a marketplace and install by plugin name:
+
+```bash
+qodercli plugins marketplace add <github-org>/sealos-skills-next
+qodercli plugins install sealos
+```
+
+Or install straight from a local clone:
+
+```bash
+qodercli plugins install ./plugins/sealos
+```
+
+Restart the CLI or run `/plugins reload` to apply. Manifests:
+`plugins/sealos/.qoder-plugin/plugin.json` + root `marketplace.json`.
 
 ### First run
 
