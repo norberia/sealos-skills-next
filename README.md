@@ -60,21 +60,13 @@ Add this repository (URL or local path) as a marketplace source under
 
 ### Qoder
 
-Add this repository as a marketplace and install by plugin name:
+In Qoder, open the plugin **Marketplace** (Settings → Plugins → Marketplace),
+click **+ Create Plugin**, choose **import from a local folder**, and select
+`plugins/sealos` from a clone of this repository.
 
-```bash
-qodercli plugins marketplace add <github-org>/sealos-skills-next
-qodercli plugins install sealos
-```
-
-Or install straight from a local clone:
-
-```bash
-qodercli plugins install ./plugins/sealos
-```
-
-Restart the CLI or run `/plugins reload` to apply. Manifests:
-`plugins/sealos/.qoder-plugin/plugin.json` + root `marketplace.json`.
+To distribute, zip the contents of `plugins/sealos` (the zip root must
+contain `.qoder-plugin/plugin.json`) as `sealos-0.1.0.zip` and share or
+publish it through the Qoder marketplace.
 
 ### First run
 
