@@ -1,0 +1,21 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sealos-skills-next",
+  "description": "Sealos agent skills for deploying, configuring, monitoring, and troubleshooting apps on Sealos Cloud from Claude Code.",
+  "owner": {
+    "name": "Sealos",
+    "email": "contact@sealos.io"
+  },
+  "plugins": [
+    {
+      "name": "sealos",
+      "description": "Sealos agent skills for deploying, configuring, monitoring, and troubleshooting apps on Sealos Cloud from Claude Code. Deploy from the template store, official Docker images, or project source; manage databases, object storage, networking, and logs.",
+      "author": {
+        "name": "Sealos"
+      },
+      "source": "./plugins/sealos",
+      "category": "deployment",
+      "homepage": "https://sealos.io"
+    }
+  ]
+}

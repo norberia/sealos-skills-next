@@ -1,0 +1,9 @@
+# Temporary reference clones (see readme-first.md)
+sealos-skills-old/
+railway-skills-ref/
+
+.DS_Store
+node_modules/
+*.log
+__pycache__/
+*.pyc

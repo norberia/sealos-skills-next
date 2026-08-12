@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint every *.sh
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(find . -name '*.sh' -not -path './.git/*' | sort)
+          if [[ "${#scripts[@]}" -eq 0 ]]; then
+            echo "No *.sh found — scripts were renamed or removed, so this job would pass without checking anything."
+            exit 1
+          fi
+          printf 'checking %s\n' "${scripts[@]}"
+          shellcheck "${scripts[@]}"
+
+  python:
+    name: Python syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile every *.py
+        run: |
+          set -euo pipefail
+          mapfile -t scripts < <(find . -name '*.py' -not -path './.git/*' | sort)
+          if [[ "${#scripts[@]}" -eq 0 ]]; then
+            echo "No *.py found."
+            exit 1
+          fi
+          printf 'compiling %s\n' "${scripts[@]}"
+          python3 -m py_compile "${scripts[@]}"
+
+  manifests:
+    name: Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every *.json parses
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find . -name '*.json' -not -path './.git/*' | sort)
+          for file in "${files[@]}"; do
+            jq -e . "$file" >/dev/null || { echo "invalid JSON: $file"; exit 1; }
+          done
+          echo "${#files[@]} JSON files parse"
+      - name: Each plugin declares one version across its host manifests
+        run: |
+          set -euo pipefail
+          # A plugin ships a manifest per host (.claude-plugin, .cursor-plugin, …)
+          # describing the same release, so their versions have to agree.
+          status=0
+          for plugin in plugins/*/; do
+            mapfile -t manifests < <(find "$plugin" -path '*/.*-plugin/plugin.json' | sort)
+            [[ "${#manifests[@]}" -eq 0 ]] && continue
+            mapfile -t versions < <(jq -r '.version' "${manifests[@]}" | sort -u)
+            if [[ "${#versions[@]}" -ne 1 ]]; then
+              echo "$plugin declares ${#versions[@]} versions: ${versions[*]}"
+              printf '  %s\n' "${manifests[@]}"
+              status=1
+              continue
+            fi
+            echo "$plugin ${versions[0]} (${#manifests[@]} manifests)"
+          done
+          exit "$status"
+
+  skills:
+    name: Skill frontmatter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Every SKILL.md has name + description frontmatter
+        run: |
+          set -euo pipefail
+          mapfile -t skills < <(find plugins -name 'SKILL.md' | sort)
+          if [[ "${#skills[@]}" -eq 0 ]]; then
+            echo "No SKILL.md found."
+            exit 1
+          fi
+          status=0
+          for skill in "${skills[@]}"; do
+            front=$(awk '/^---$/{n++; next} n==1{print} n>=2{exit}' "$skill")
+            for key in name description; do
+              if ! grep -q "^$key:" <<<"$front"; then
+                echo "$skill: missing '$key' in frontmatter"
+                status=1
+              fi
+            done
+            echo "$skill OK"
+          done
+          exit "$status"
