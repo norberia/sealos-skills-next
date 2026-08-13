@@ -86,14 +86,6 @@ or paste a kubeconfig from the Sealos web console into `~/.sealos/kubeconfig`.
 All three paths go through the Sealos Template API, so every deployment is
 tracked as an instance: visible in the Sealos UI and removable as a unit.
 
-## Validation
-
-All 39 reference apps (21 store templates + 18 image recipes, from
-Excalidraw to PostHog/Immich/Discourse) were deployed end-to-end on
-usw-1.sealos.io with this plugin's own tooling — workloads ready AND public
-URL responding — then removed. Times, per-app notes, and the bugs this
-process caught are in [validation/results.md](validation/results.md).
-
 ## Requirements
 
 - `kubectl`, `python3` (stdlib only); `docker` + `gh` only for the source path
