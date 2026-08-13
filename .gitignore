@@ -1,4 +1,7 @@
-# Temporary reference clones (see readme-first.md)
+# Local-only test dumps, notes, and reference clones
+validation-assets/
+
+# Legacy clone locations (pre-validation-assets); do not re-create these
 sealos-skills-old/
 railway-skills-ref/
 

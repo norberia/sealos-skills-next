@@ -94,5 +94,5 @@ tracked as an instance: visible in the Sealos UI and removable as a unit.
 
 ## Development
 
-`readme-first.md` holds the original project brief. Temporary reference
-clones (`sealos-skills-old/`, `railway-skills-ref/`) are gitignored.
+Scratch clones, test dumps, and other local-only artifacts go in
+`validation-assets/` (gitignored).

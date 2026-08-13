@@ -1,0 +1,28 @@
+---
+description: Keep all local test artifacts and scratch clones in gitignored validation-assets/
+alwaysApply: true
+---
+
+# Local scratch: `validation-assets/`
+
+Anything that is not the plugin itself goes under repo-root `validation-assets/`. Create the directory if it is missing. Never commit it.
+
+This includes: test dumps, batch-validation notes, screenshots, kubeconfig copies, project-list CSVs, cloned reference repos, and any other local-only artifact.
+
+Do not put these at repo root, under `plugins/`, or in a tracked `validation/` folder.
+
+**Not scratch** (must stay in git):
+
+- `plugins/sealos/skills/use-sealos/references/` — skill docs loaded on demand
+- Plugin manifests, `SKILL.md`, and `scripts/`
+
+```text
+❌ validation/results.md
+❌ sealos-skills-old/
+❌ railway-skills-ref/
+❌ 开发阶段项目库.csv          # repo root
+
+✅ validation-assets/results.md
+✅ validation-assets/sealos-skills-old/
+✅ validation-assets/project-list.csv
+```
