@@ -54,6 +54,18 @@ jobs:
             jq -e . "$file" >/dev/null || { echo "invalid JSON: $file"; exit 1; }
           done
           echo "${#files[@]} JSON files parse"
+      - name: DeepSeek Harness bundle manifest is loadable
+        run: |
+          set -euo pipefail
+          jq -e '.dsh.bundle.patch == "./cordis.patch.yml"' package.json >/dev/null
+          test -f cordis.patch.yml
+          test -f index.js
+          node --check index.js
+      - name: DeepSeek Harness plugin registers use-sealos
+        run: |
+          set -euo pipefail
+          npm install --omit=dev
+          node --test test.js
       - name: Each plugin declares one version across its host manifests
         run: |
           set -euo pipefail

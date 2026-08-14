@@ -1,7 +1,8 @@
 # sealos-skills-next
 
 Agent plugin for deploying and operating apps on [Sealos Cloud](https://sealos.io),
-packaged in the [Agent Plugins](https://agent-plugins.org/) format.
+packaged in the [Agent Plugins](https://agent-plugins.org/) format and as a
+[DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) profile bundle.
 
 Say "deploy X to Sealos" (or "帮我把 X 部署到 Sealos") in a compatible agent
 and the `use-sealos` skill handles the rest: sign-in, picking the fastest
@@ -10,6 +11,9 @@ deploy path, databases, storage, public HTTPS, and post-deploy verification.
 ## What's inside
 
 ```
+package.json                        # DeepSeek Harness bundle manifest (`dsh.bundle`)
+cordis.patch.yml                    # inserts the skill provider into a dsh profile
+index.js                            # registers `use-sealos` on `ctx.skills`
 plugins/sealos/
 ├── .claude-plugin/plugin.json      # Claude Code manifest
 ├── .cursor-plugin/plugin.json      # Cursor manifest
@@ -67,6 +71,27 @@ click **+ Create Plugin**, choose **import from a local folder**, and select
 To distribute, zip the contents of `plugins/sealos` (the zip root must
 contain `.qoder-plugin/plugin.json`) as `sealos-0.1.0.zip` and share or
 publish it through the Qoder marketplace.
+
+### DeepSeek Harness
+
+This repository is a dsh profile bundle. After `npx @deepseek-ai/dsh web` works, install the plugin into the same `web` profile (`pnpm` must be on `PATH`):
+
+```sh
+npx @deepseek-ai/dsh plugin --profile web add github:norberia/sealos-skills-next
+npx @deepseek-ai/dsh web
+```
+
+A local checkout:
+
+```sh
+npx @deepseek-ai/dsh plugin --profile web add /path/to/sealos-skills-next
+```
+
+`use-sealos` appears in the session skill catalog. Say "deploy X to Sealos"; the model loads the skill via the `skill` tool, then runs `scripts/sealos-api.py` / `kubectl` through bash.
+
+The default bash sandbox blocks writes outside the workspace. Login writes `~/.sealos/kubeconfig`, so those commands need `sandbox_permissions: danger-full-access`.
+
+Add the GitHub topic `dsh-plugin` on the public repo so it shows up in the harness plugin index.
 
 ### First run
 

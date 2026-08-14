@@ -37,6 +37,9 @@ restricted **kubeconfig** (`~/.sealos/kubeconfig`). Within the namespace:
 
 ## Tools
 
+Resolve `scripts/` and `references/` against this skill's directory, not the
+project working directory.
+
 - `scripts/sealos-api.py` — auth (`status`, `login`, `workspaces`, `switch`)
   and the Template API (`deploy`, `store-list`). Deploying through the
   Template API (not raw `kubectl apply`) is what makes resources show up as a
@@ -143,6 +146,9 @@ Load only what the task needs — usually one reference, two at most.
 8. One deploy at a time per app name; name collisions in a shared namespace
    break selectors. Random suffixes (`-a1b2c3d4`) are there for a reason —
    keep them.
+9. If the agent sandbox blocks writes outside the workspace, escalate file
+   access for writing `~/.sealos/kubeconfig`, using the Docker socket, and any
+   command that must read that kubeconfig.
 
 ## Response format
 
