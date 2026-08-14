@@ -45,15 +45,15 @@ async function loadSkill(signal) {
 function parseSkillFile(raw) {
   const parsed = parseFrontmatter(raw)
   if (parsed === undefined) {
-    throw new Error(`dsh-plugin-sealos: ${SKILL_FILE} is missing YAML frontmatter`)
+    throw new Error(`sealos: ${SKILL_FILE} is missing YAML frontmatter`)
   }
   const skillName = stringField(parsed.data, 'name')
   const description = stringField(parsed.data, 'description')
   if (skillName === undefined || description === undefined) {
-    throw new Error(`dsh-plugin-sealos: ${SKILL_FILE} frontmatter requires name and description`)
+    throw new Error(`sealos: ${SKILL_FILE} frontmatter requires name and description`)
   }
   if (!SKILL_NAME.test(skillName)) {
-    throw new Error(`dsh-plugin-sealos: invalid skill name "${skillName}"`)
+    throw new Error(`sealos: invalid skill name "${skillName}"`)
   }
   return {
     name: skillName,

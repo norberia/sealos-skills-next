@@ -5,7 +5,7 @@ import { apply } from './index.js'
 
 const skillDir = fileURLToPath(new URL('./plugins/sealos/skills/use-sealos/', import.meta.url))
 
-describe('dsh-plugin-sealos', () => {
+describe('sealos', () => {
   it('registers use-sealos from the packaged SKILL.md', async () => {
     const providers = []
     apply({

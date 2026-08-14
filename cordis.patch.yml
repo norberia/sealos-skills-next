@@ -3,4 +3,4 @@
 # skill registry and the model-facing skill loader.
 - insert:
     - id: sealos-skill
-      name: dsh-plugin-sealos
+      name: sealos
