@@ -19,13 +19,18 @@ plugins/sealos/
 ├── .cursor-plugin/plugin.json      # Cursor manifest
 ├── .qoder-plugin/plugin.json       # Qoder manifest
 └── skills/use-sealos/
-    ├── SKILL.md                    # intent router + execution rules
+    ├── SKILL.md                    # scenario router: role, communication, scope, routing
     ├── references/                 # loaded on demand
-    │   ├── deploy.md               # three deploy paths (store / image / source)
+    │   ├── sealos-overview.md      # read-once mental model (first task of a session)
+    │   ├── scenario-deploy-project.md  # go live with the user's own project
+    │   ├── scenario-deploy-known.md    # known app via the template store
+    │   ├── scenario-create-db.md       # managed database / object storage
+    │   ├── scenario-troubleshoot.md    # broken app: triage and fix
+    │   ├── scenario-adjust.md          # scale / env / version changes
+    │   ├── scenario-status-delete.md   # inventory and teardown
     │   ├── build.md                # Dockerfile, linux/amd64 build, registry push
     │   ├── databases.md            # KubeBlocks clusters + credentials
     │   ├── platform.md             # manifest contract (labels, Ingress, storage, quota)
-    │   ├── operate.md              # status, logs, debugging, deletion
     │   └── recipes.md              # per-app recipes for popular self-hosted software
     └── scripts/
         ├── sealos-api.py           # auth (OAuth2 device flow) + Template API, stdlib only

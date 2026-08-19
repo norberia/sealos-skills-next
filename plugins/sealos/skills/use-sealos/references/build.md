@@ -75,5 +75,7 @@ redeploys of the same app; delete it manually when the app is gone for good.
 
 ## 4. Hand off to deploy
 
-Continue with [deploy.md](deploy.md) Path B using the pushed image reference.
-`originImageName` in the workload annotation should be the image you pushed.
+Continue with the go-live scenario
+([scenario-deploy-project.md](scenario-deploy-project.md), steps 4-7) using
+the pushed image reference. `originImageName` in the workload annotation
+should be the image you pushed.
