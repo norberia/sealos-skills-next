@@ -3,6 +3,8 @@
 Agent plugin for deploying and operating apps on [Sealos Cloud](https://sealos.io),
 packaged in the [Agent Plugins](https://agent-plugins.org/) format and as a
 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) profile bundle.
+The same `use-sealos` skill is also installable through `skills.sh`, OpenClaw /
+ClawHub, CodeBuddy, Gemini CLI, Qwen Code, and generic repo importers.
 
 Say "deploy X to Sealos" (or "帮我把 X 部署到 Sealos") in a compatible agent
 and the `use-sealos` skill handles the rest: sign-in, picking the fastest
@@ -14,6 +16,12 @@ deploy path, databases, storage, public HTTPS, and post-deploy verification.
 package.json                        # DeepSeek Harness bundle manifest (`dsh.bundle`)
 cordis.patch.yml                    # inserts the skill provider into a dsh profile
 index.js                            # registers `use-sealos` on `ctx.skills`
+CLAUDE.md                           # context-only hosts (Gemini, Qwen, Amp / Kimi)
+gemini-extension.json               # Gemini CLI extension
+qwen-extension.json                 # Qwen Code extension
+openclaw.plugin.json                # OpenClaw / ClawHub pointer at the Claude bundle
+.codebuddy-plugin/marketplace.json  # CodeBuddy marketplace
+skills/use-sealos                   # skills.sh entry (symlink → plugins/sealos/skills/use-sealos)
 plugins/sealos/
 ├── .claude-plugin/plugin.json      # Claude Code manifest
 ├── .cursor-plugin/plugin.json      # Cursor manifest
@@ -92,6 +100,64 @@ npx @deepseek-ai/dsh plugin --profile web add /path/to/sealos-skills-next
 The default bash sandbox blocks writes outside the workspace. Login writes `~/.sealos/kubeconfig`, so those commands need `sandbox_permissions: danger-full-access`.
 
 Add the GitHub topic `dsh-plugin` on the public repo so it shows up in the harness plugin index.
+
+### OpenClaw / ClawHub
+
+```sh
+clawhub install norberia/sealos-skills-next
+```
+
+`openclaw.plugin.json` points at `plugins/sealos/.claude-plugin/plugin.json`.
+Slash-command exposure is host-dependent and not claimed. Say "deploy X to
+Sealos".
+
+To load the plugin folder as a Claude/Cursor bundle instead:
+
+```sh
+openclaw plugins install /path/to/sealos-skills-next/plugins/sealos
+```
+
+### CodeBuddy
+
+```text
+/plugin marketplace add norberia/sealos-skills-next
+```
+
+Command exposure depends on the CodeBuddy runtime.
+
+### Gemini CLI
+
+Context-only extension. Slash commands are not claimed.
+
+```sh
+gemini extensions install https://github.com/norberia/sealos-skills-next
+```
+
+Ask Gemini to deploy to Sealos Cloud. It loads `CLAUDE.md`, which points at
+`use-sealos`.
+
+### Qwen Code
+
+Context-only extension. Slash commands are not claimed.
+
+```sh
+qwen extensions install https://github.com/norberia/sealos-skills-next
+```
+
+### skills.sh
+
+```sh
+npx skills add norberia/sealos-skills-next
+```
+
+The pack has one skill, `use-sealos`. Direct `/sealos-deploy` entries are not
+claimed. After install, say "deploy X to Sealos".
+
+### Amp / Kimi / generic repo importers
+
+Import `https://github.com/norberia/sealos-skills-next.git`. Behavior is
+host-dependent. Context is `CLAUDE.md`; the skill lives at `skills/use-sealos`
+and `plugins/sealos/skills/use-sealos`.
 
 ### First run
 
