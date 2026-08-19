@@ -32,7 +32,7 @@ args list them in Notes.
 | Penpot | `penpot` | multi-service |
 | Budibase | `budibase` | multi-service; args: `admin_email`, `admin_password` |
 | Rocket.Chat | `rocketchat` (or `rocketchat-micro`) | mongo included; args: `admin_username`, `admin_name`, `admin_email`, `admin_password` |
-| Umami | `umami` | pg included |
+| Umami | `umami` | pg included; arg: `APP_SECRET` (required — replace the `admin` default with a random string) |
 | Immich | `immich` | heavy: server + ML + pgvector |
 
 Always re-check with `store-list --search` — the store gains templates over

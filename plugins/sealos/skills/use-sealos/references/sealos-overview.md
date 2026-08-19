@@ -25,8 +25,12 @@ own things:
 Under the hood (yours to know, not the user's): apps are ordinary
 Deployments/StatefulSets + Service + Ingress labeled
 `cloud.sealos.io/app-deploy-manager: <app>` so the App Launchpad UI manages
-them; public HTTPS is `<host>.<region-domain>` with a wildcard cert;
-databases are KubeBlocks `Cluster` CRs.
+them; public HTTPS is an auto-assigned `<host>.<app-domain>` with a
+wildcard cert — the app domain is region-specific and can differ from the
+region's own domain (hzh serves apps under `sealoshzh.site` while its API
+is `hzh.sealos.run`), so never guess the URL: read the host from the
+instance's Ingress; inside templates `${{ SEALOS_CLOUD_DOMAIN }}` resolves
+to the right domain. Databases are KubeBlocks `Cluster` CRs.
 
 ## Template store
 
