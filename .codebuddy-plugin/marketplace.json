@@ -1,0 +1,33 @@
+{
+  "name": "sealos",
+  "owner": {
+    "name": "Sealos",
+    "url": "https://sealos.io/"
+  },
+  "description": "Sealos agent skills for deploying, configuring, monitoring, and troubleshooting apps on Sealos Cloud.",
+  "version": "0.1.0",
+  "plugins": [
+    {
+      "name": "sealos",
+      "source": "./plugins/sealos",
+      "description": "Sealos agent skills for deploying, configuring, monitoring, and troubleshooting apps on Sealos Cloud from CodeBuddy. Deploy from the template store, official Docker images, or project source; manage databases, object storage, networking, and logs.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Sealos",
+        "url": "https://sealos.io/"
+      },
+      "homepage": "https://sealos.io/",
+      "repository": "https://github.com/labring/sealos-skills-next",
+      "license": "MIT",
+      "category": "coding",
+      "keywords": [
+        "sealos",
+        "sealos-cloud",
+        "deployment",
+        "kubernetes",
+        "agent-skills"
+      ],
+      "strict": false
+    }
+  ]
+}

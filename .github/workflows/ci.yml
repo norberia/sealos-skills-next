@@ -65,7 +65,13 @@ jobs:
         run: |
           set -euo pipefail
           npm install --omit=dev
-          node --test test.js
+          node --test test.js test-host-coverage.js
+      - name: skills.sh entry is a symlink to the canonical skill
+        run: |
+          set -euo pipefail
+          test -L skills/use-sealos
+          test "$(realpath skills/use-sealos)" = "$(realpath plugins/sealos/skills/use-sealos)"
+          test -f skills/use-sealos/SKILL.md
       - name: Each plugin declares one version across its host manifests
         run: |
           set -euo pipefail
