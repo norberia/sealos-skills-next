@@ -16,6 +16,7 @@ Find the failure, fix it, verify it is really back.
    reports may be their own custom domain, not the subdomain we assigned —
    resolve it against Ingress rules:
    ```bash
+   export KUBECONFIG=~/.sealos/kubeconfig     # once per session
    kubectl get ingress -o custom-columns='HOST:.spec.rules[0].host,NAME:.metadata.name'
    ```
 2. **Gather evidence**:
