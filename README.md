@@ -19,7 +19,7 @@ index.js                            # registers `use-sealos` on `ctx.skills`
 CLAUDE.md                           # context-only hosts (Gemini, Qwen, Amp / Kimi)
 gemini-extension.json               # Gemini CLI extension
 qwen-extension.json                 # Qwen Code extension
-openclaw.plugin.json                # OpenClaw / ClawHub pointer at the Claude bundle
+openclaw.plugin.json                # unused on OpenClaw's native package.json path; install plugins/sealos instead
 .codebuddy-plugin/marketplace.json  # CodeBuddy marketplace
 skills/use-sealos                   # skills.sh entry (symlink → plugins/sealos/skills/use-sealos)
 plugins/sealos/
@@ -101,21 +101,20 @@ The default bash sandbox blocks writes outside the workspace. Login writes `~/.s
 
 Add the GitHub topic `dsh-plugin` on the public repo so it shows up in the harness plugin index.
 
-### OpenClaw / ClawHub
+### OpenClaw
 
-```sh
-clawhub install norberia/sealos-skills-next
-```
-
-`openclaw.plugin.json` points at `plugins/sealos/.claude-plugin/plugin.json`.
-Slash-command exposure is host-dependent and not claimed. Say "deploy X to
-Sealos".
-
-To load the plugin folder as a Claude/Cursor bundle instead:
+Install the plugin directory, not the repository root:
 
 ```sh
 openclaw plugins install /path/to/sealos-skills-next/plugins/sealos
 ```
+
+OpenClaw loads it as a Cursor bundle and exposes `use-sealos`. Slash-command
+exposure is not claimed. Say "deploy X to Sealos".
+
+Do not install the repo root. OpenClaw sees root `package.json` first, treats
+the checkout as a native plugin, and fails because that package has no
+`openclaw.extensions`. Root `openclaw.plugin.json` is not used on that path.
 
 ### CodeBuddy
 

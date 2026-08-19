@@ -73,7 +73,7 @@ describe('host coverage', () => {
       'npx skills add norberia/sealos-skills-next',
       'gemini extensions install https://github.com/norberia/sealos-skills-next',
       'qwen extensions install https://github.com/norberia/sealos-skills-next',
-      'clawhub install norberia/sealos-skills-next',
+      'openclaw plugins install /path/to/sealos-skills-next/plugins/sealos',
       '/plugin marketplace add norberia/sealos-skills-next',
       'Amp / Kimi',
     ]) {
