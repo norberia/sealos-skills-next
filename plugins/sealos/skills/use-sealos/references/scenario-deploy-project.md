@@ -69,6 +69,9 @@ handle everything end to end; they just receive the URL.
   resources are still finalizing from an earlier delete (KubeBlocks
   clusters take minutes) → redeploy under a **fresh** name, never the
   just-failed one.
+- Keep the random suffix in `app_name`/`app_host`, and run one deploy per
+  app name: stripping the suffix collides with earlier deploys in the
+  shared namespace and breaks selectors.
 - App runs but misbehaves (won't open / errors / slow) → switch to the
   troubleshoot scenario ([scenario-troubleshoot.md](scenario-troubleshoot.md)).
 - Iterating a failed deploy: fix the template, `sealos-api.py delete

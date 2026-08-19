@@ -17,6 +17,7 @@ Change what is already running, then verify the change landed.
    (image).
 2. **Apply it**:
    ```bash
+   export KUBECONFIG=~/.sealos/kubeconfig     # once per session
    kubectl scale deploy/<name> --replicas=<n>
    kubectl set env deploy/<name> KEY=value
    kubectl set image deploy/<name> <container>=<image>

@@ -34,9 +34,14 @@ path (~3 min). When a template exists, never build the product yourself.
    Use `--args-file` for secret values. The response lists every created
    resource; the instance name is `name` in the response (defaults to
    `<template>-<random8>`).
-6. **Verify**:
+6. **Verify** — same recipe as any deploy (store instances carry the
+   instance label too, and `-l` discovers their KubeBlocks clusters):
    ```bash
-   bash scripts/wait-app.sh -u https://<host>.<region-domain> [deployment/<name>]
+   export KUBECONFIG=~/.sealos/kubeconfig
+   HOST=$(kubectl get ingress -l "cloud.sealos.io/deploy-on-sealos=<instance>" \
+     -o jsonpath='{.items[0].spec.rules[0].host}')
+   bash scripts/wait-app.sh -t 600 -u "https://$HOST" \
+     -l "cloud.sealos.io/deploy-on-sealos=<instance>"
    ```
 
 ## Pitfalls

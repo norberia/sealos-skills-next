@@ -12,15 +12,16 @@ Find the failure, fix it, verify it is really back.
 
 ## Steps
 
-1. **Pin down WHICH app**: ask which URL is failing. The host the user
-   reports may be their own custom domain, not the subdomain we assigned —
-   resolve it against Ingress rules:
+1. **Pin down WHICH app**: ask which URL is failing and when it started.
+   The host the user reports may be their own custom domain, not the
+   subdomain we assigned — resolve it against Ingress rules:
    ```bash
    export KUBECONFIG=~/.sealos/kubeconfig     # once per session
    kubectl get ingress -o custom-columns='HOST:.spec.rules[0].host,NAME:.metadata.name'
    ```
 2. **Gather evidence**:
    ```bash
+   kubectl logs deploy/<name> --tail=100                    # quick app log, no pod name needed
    kubectl get pods
    kubectl describe pod <pod>
    kubectl logs <pod> --all-containers --tail=100
