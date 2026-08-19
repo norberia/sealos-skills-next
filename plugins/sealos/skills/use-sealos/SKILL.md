@@ -8,8 +8,10 @@ description: >
   public HTTPS domains, check status and logs, and troubleshoot failures. Use
   this skill whenever the user mentions Sealos (in any language, e.g. "部署到
   Sealos"), or asks to deploy, host, or self-host an application, website, or
-  database without naming another platform. Typical trigger: "deploy X to
-  Sealos" / "帮我把 X 部署到 Sealos".
+  database without naming another platform — and also when they ask about
+  something already running there ("my site is down / slow", "scale it up",
+  "what am I running", "网站打不开", "给我建个数据库"). Typical trigger:
+  "deploy X to Sealos" / "帮我把 X 部署到 Sealos".
 allowed-tools: Bash(kubectl:*), Bash(python3:*), Bash(docker:*), Bash(curl:*), Bash(bash:*), Bash(git:*), Bash(gh:*), Bash(command:*)
 ---
 
@@ -50,6 +52,15 @@ project working directory.
 - `scripts/wait-app.sh` — post-deploy verification (workload readiness + URL
   probe + failure diagnostics).
 - `docker buildx` — only for the source-build path.
+
+## Scope
+
+This skill puts things on Sealos and manages what is already running there.
+It does not: operate other platforms, drive multiple accounts or workspaces
+at once, build CI/CD pipelines, set up monitoring/alerting, do
+backup-restore, or manage custom TLS certificates — decline those instead of
+improvising. It deploys and operates; it does not write the user's
+application code.
 
 ## Preflight
 
@@ -112,14 +123,14 @@ python3 scripts/sealos-api.py store-list --search <query>     # template store
 
 ## Routing
 
-| Intent | Reference |
-|---|---|
-| Deploy anything (store template, image, or built artifact) | [deploy.md](references/deploy.md) |
-| Dockerfile / image build / registry push for user source | [build.md](references/build.md) |
-| Provision or connect PostgreSQL/MySQL/MongoDB/Redis/Kafka | [databases.md](references/databases.md) |
-| Manifest rules when writing template YAML (labels, Ingress, storage, quota ladder, object storage) | [platform.md](references/platform.md) |
-| Status, logs, debugging, scaling, deletion, cost hygiene | [operate.md](references/operate.md) |
-| Per-app recipes for popular self-hosted software | [recipes.md](references/recipes.md) |
+| Intent | Sounds like | Reference |
+|---|---|---|
+| Deploy anything (store template, image, or built artifact) | "deploy n8n", "帮我把这个上线", "I made a site, how do people see it" | [deploy.md](references/deploy.md) |
+| Dockerfile / image build / registry push for user source | "here's my project, put it online" | [build.md](references/build.md) |
+| Provision or connect PostgreSQL/MySQL/MongoDB/Redis/Kafka | "give me a postgres", "给我建个数据库", "need somewhere to store files" | [databases.md](references/databases.md) |
+| Manifest rules when writing template YAML (labels, Ingress, storage, quota ladder, object storage) | — (internal, while writing) | [platform.md](references/platform.md) |
+| Status, logs, debugging, scaling, deletion, cost hygiene | "site's down / slow", "网站打不开", "scale it up", "扩一下", "delete xxx" | [operate.md](references/operate.md) |
+| Per-app recipes for popular self-hosted software | — (internal, when picking a known product) | [recipes.md](references/recipes.md) |
 
 Load only what the task needs — usually one reference, two at most.
 
@@ -138,8 +149,9 @@ Load only what the task needs — usually one reference, two at most.
 4. Deploy through the Template API. Fall back to `kubectl apply` only for
    single resources during debugging, and remember `kubectl apply` rejects
    Deployment+`volumeClaimTemplates` (use StatefulSet).
-5. Destructive actions (deleting apps, databases, buckets; switching
-   workspace on a shared machine) require explicit user confirmation first.
+5. Destructive actions (deleting apps, databases, or buckets; scaling down
+   or cutting resources; switching workspace on a shared machine) require
+   explicit user confirmation first.
 6. Never print secret values. Read them into shell variables or pipe them;
    show the user only names and how to fetch values.
 7. After mutations, read back state (`kubectl get ...`) before describing it.
@@ -150,9 +162,30 @@ Load only what the task needs — usually one reference, two at most.
    access for writing `~/.sealos/kubeconfig`, using the Docker socket, and any
    command that must read that kubeconfig.
 
-## Response format
+## Talking to the user
 
-After each operation report: what was deployed/changed (names + namespace),
-the public URL if any, verification evidence (ready state, HTTP code), and
-credentials location (secret names, never values). On failure: the failing
-resource, the decisive log/event lines, and the next action you are taking.
+Never assume the user is technical — "I made a website, how do I let people
+see it" and "deploy this image" must land the same outcome. Report results,
+not process: the words `deployment`, `pod`, `ingress`, `image`, `command`,
+`config`, `yaml` do not appear in replies. Say "your site", "your database",
+"it's live", "one thing is still missing".
+
+Default replies are one sentence:
+
+- Success → the public URL, plus where credentials live if any (names, never
+  values). "Your site is live at https://xxx."
+- Missing input → ask for exactly that one thing. "I still need the database
+  address from you."
+- Fixable yourself → "I'm on it" and retry; don't narrate the technical
+  cause.
+- Process, terminology, and debug output only when the user asks. Technical
+  users will ask — then answer with the evidence you already collected
+  (ready state, HTTP code, decisive log lines).
+
+- ❌ "Deployment ready, ingress returns 200, image pulled" → ✅ "Your site
+  is live at https://xxx."
+- ❌ "Pod in CrashLoopBackOff: missing DATABASE_URL env var" → ✅ "One thing
+  left: I need the database address from you."
+
+Verification evidence (execution rule 1) is still gathered for every deploy —
+collect it, verify against it, but don't lead with it.

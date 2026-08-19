@@ -17,7 +17,15 @@ kubectl get resourcequota -o yaml                          # namespace quota vs 
 
 ## Triage a broken app
 
-Work evidence-first; each step narrows the failure class:
+First pin down WHICH app: ask which URL is failing, and remember the host
+the user reports may be their own custom domain, not the
+`<host>.<region-domain>` we assigned — match it against Ingress rules:
+
+```bash
+kubectl get ingress -o custom-columns='HOST:.spec.rules[0].host,NAME:.metadata.name'
+```
+
+Then work evidence-first; each step narrows the failure class:
 
 ```bash
 kubectl get pods                                           # which pod, which state
