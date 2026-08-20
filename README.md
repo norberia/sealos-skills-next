@@ -21,23 +21,28 @@ gemini-extension.json               # Gemini CLI extension
 qwen-extension.json                 # Qwen Code extension
 openclaw.plugin.json                # unused on OpenClaw's native package.json path; install plugins/sealos instead
 .codebuddy-plugin/marketplace.json  # CodeBuddy marketplace
-skills/use-sealos                   # skills.sh entry (symlink → plugins/sealos/skills/use-sealos)
+skills/                             # skills.sh entries (symlinks → plugins/sealos/skills/*)
 plugins/sealos/
 ├── .claude-plugin/plugin.json      # Claude Code manifest
 ├── .cursor-plugin/plugin.json      # Cursor manifest
 ├── .qoder-plugin/plugin.json       # Qoder manifest
-└── skills/use-sealos/
-    ├── SKILL.md                    # intent router + execution rules
-    ├── references/                 # loaded on demand
-    │   ├── deploy.md               # three deploy paths (store / image / source)
-    │   ├── build.md                # Dockerfile, linux/amd64 build, registry push
-    │   ├── databases.md            # KubeBlocks clusters + credentials
-    │   ├── platform.md             # manifest contract (labels, Ingress, storage, quota)
-    │   ├── operate.md              # status, logs, debugging, deletion
-    │   └── recipes.md              # per-app recipes for popular self-hosted software
-    └── scripts/
-        ├── sealos-api.py           # auth (OAuth2 device flow) + Template API, stdlib only
-        └── wait-app.sh             # post-deploy readiness + URL verification
+└── skills/
+    ├── use-sealos/
+    │   ├── SKILL.md                # intent router + execution rules
+    │   ├── references/             # loaded on demand
+    │   │   ├── deploy.md           # three deploy paths (store / image / source)
+    │   │   ├── build.md            # Dockerfile, linux/amd64 build, registry push
+    │   │   ├── databases.md        # KubeBlocks clusters + credentials
+    │   │   ├── platform.md         # manifest contract (labels, Ingress, storage, quota)
+    │   │   ├── operate.md          # status, logs, debugging, deletion
+    │   │   └── recipes.md          # per-app recipes for popular self-hosted software
+    │   └── scripts/
+    │       ├── sealos-api.py       # auth (OAuth2 device flow) + Template API, stdlib only
+    │       └── wait-app.sh         # post-deploy readiness + URL verification
+    ├── sealos-deploy/SKILL.md      # Brain managed-mode entry (MCP-gated pipeline)
+    └── k8s-kaniko-job/             # sandbox build executor (Kaniko Job → GHCR)
+        ├── SKILL.md
+        └── scripts/kaniko-build.py
 ```
 
 ## Installation
@@ -149,8 +154,18 @@ qwen extensions install https://github.com/norberia/sealos-skills-next
 npx skills add norberia/sealos-skills-next
 ```
 
-The pack has one skill, `use-sealos`. Direct `/sealos-deploy` entries are not
-claimed. After install, say "deploy X to Sealos".
+The pack installs three skills: `use-sealos` (the interactive entry — say
+"deploy X to Sealos"), plus `sealos-deploy` and `k8s-kaniko-job`, which are
+inert outside a managed sandbox (see below).
+
+### Brain (managed sandbox)
+
+Brain's GitHub-deploy pipeline installs this pack into a Devbox with
+`npx skills add <repo> -y` and drives the `sealos-deploy` skill in managed
+mode (`SEALAI_DEPLOY_MODE=managed`, MCP handshake via `template_ready` /
+`deployment_completed`, source builds via a `k8s-kaniko-job` Kaniko Job).
+Point Brain's `DEPLOY_SKILL_SOURCE` env at this repository. The design and
+the full control-plane contract live in `BRAIN-ADAPTATION.md`.
 
 ### Amp / Kimi / generic repo importers
 
