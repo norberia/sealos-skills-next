@@ -1,0 +1,4 @@
+{
+  "name": "sealos-skills-next",
+  "install": "bash .cursor/install.sh"
+}
