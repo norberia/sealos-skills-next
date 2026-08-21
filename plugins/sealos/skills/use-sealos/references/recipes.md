@@ -1,11 +1,12 @@
 # Recipes: popular self-hosted apps on Sealos
 
-Fast lane for known products. Store rows deploy via Path A; image rows deploy
-via Path B with the listed ingredients. Treat image-row details as strong
+Fast lane for known products. Store rows deploy via the template store;
+image rows deploy via a generated template with the listed ingredients.
+Treat image-row details as strong
 starting points — confirm port/env against the project's compose file when a
 deploy misbehaves.
 
-## In the template store (Path A — use these names)
+## In the template store (use these names)
 
 All 21 rows deployed end-to-end on usw-1 (2026-08-12); rows with required
 args list them in Notes.
@@ -31,13 +32,13 @@ args list them in Notes.
 | Penpot | `penpot` | multi-service |
 | Budibase | `budibase` | multi-service; args: `admin_email`, `admin_password` |
 | Rocket.Chat | `rocketchat` (or `rocketchat-micro`) | mongo included; args: `admin_username`, `admin_name`, `admin_email`, `admin_password` |
-| Umami | `umami` | pg included |
+| Umami | `umami` | pg included; arg: `APP_SECRET` (required — replace the `admin` default with a random string) |
 | Immich | `immich` | heavy: server + ML + pgvector |
 
 Always re-check with `store-list --search` — the store gains templates over
-time, so an app listed below may have graduated to Path A.
+time, so an app listed below may have graduated to the store.
 
-## Image recipes (Path B)
+## Image recipes (generated template)
 
 All rows below were deployed end-to-end on usw-1 (2026-08-12): official image →
 generated template → public URL responding. Sizes are validated starting
@@ -55,7 +56,7 @@ points, not minimums.
 | Misskey | `misskey/misskey:latest` | 3000 | `/misskey/files` | pg (db `misskey`) + redis; render `/misskey/.config/default.yml` via initContainer onto a small PVC (needs db+redis passwords → can't be a ConfigMap); `id: 'aidx'`; WS ingress (`backend-protocol: WS`) |
 | Stirling-PDF | `stirlingtools/stirling-pdf:latest` | 8080 | `/usr/share/tessdata` (optional) | none; `:latest` ships with login enabled → expect 401 on `/`, default creds `admin`/`stirling` |
 | MeTube | `ghcr.io/alexta69/metube:latest` | 8081 | `/downloads` | none |
-| Discourse | `bitnamilegacy/discourse:latest` | 3000 | `/bitnami/discourse` | **`bitnami/discourse` is gone from Docker Hub** (Broadcom archived Bitnami, 2025); `bitnamilegacy` is a frozen archive — flag this to the user, the alternative is Discourse's official launcher build (Path C). pg (db `discourse` + `CREATE EXTENSION hstore; pg_trgm`) + redis; sidekiq as second workload (same image, command `/opt/bitnami/scripts/discourse-sidekiq/run.sh`); `DISCOURSE_HOST/DATABASE_*/REDIS_*/USERNAME/PASSWORD/EMAIL`, `DISCOURSE_PRECOMPILE_ASSETS=no`; give main 2c/4Gi |
+| Discourse | `bitnamilegacy/discourse:latest` | 3000 | `/bitnami/discourse` | **`bitnami/discourse` is gone from Docker Hub** (Broadcom archived Bitnami, 2025); `bitnamilegacy` is a frozen archive — flag this to the user, the alternative is Discourse's official launcher build (building from source). pg (db `discourse` + `CREATE EXTENSION hstore; pg_trgm`) + redis; sidekiq as second workload (same image, command `/opt/bitnami/scripts/discourse-sidekiq/run.sh`); `DISCOURSE_HOST/DATABASE_*/REDIS_*/USERNAME/PASSWORD/EMAIL`, `DISCOURSE_PRECOMPILE_ASSETS=no`; give main 2c/4Gi |
 | Zabbix | `zabbix/zabbix-server-pgsql:latest` + `zabbix/zabbix-web-nginx-pgsql:latest` | web 8080 | — | pg (db `zabbix`; server auto-creates schema on first boot); two workloads; web needs `ZBX_SERVER_HOST=<server svc FQDN>` + `PHP_TZ`, both need `DB_SERVER_HOST/DB_SERVER_PORT/POSTGRES_*`; login `Admin`/`zabbix` |
 | FreeScout | `tiredofit/freescout:latest` | 80 | `/data` | mysql (db `freescout`); `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASS`, `SITE_URL=https://<public host>`, `ENABLE_SSL_PROXY=TRUE`, `ADMIN_EMAIL`/`ADMIN_PASS` |
 | Apache Guacamole | `guacamole/guacamole:1.6.0` + `guacamole/guacd:1.6.0` | 8080 | — | pg (db `guacamole_db`); **pin web+guacd to the same version**; schema init Job: fetch `001-create-schema.sql` + `002-create-admin-user.sql` from the guacamole-client repo **at the matching tag** and `psql -f` them; env `GUACD_HOSTNAME=<guacd svc FQDN>`, `POSTGRESQL_HOSTNAME/PORT/DATABASE/USERNAME/PASSWORD`, `WEBAPP_CONTEXT=ROOT` (serve at `/` instead of `/guacamole/`); login `guacadmin`/`guacadmin` |
