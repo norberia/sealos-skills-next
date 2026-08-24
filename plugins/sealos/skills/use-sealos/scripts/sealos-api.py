@@ -17,11 +17,13 @@ Commands:
   deploy-store <template> [...]  deploy a template-store template by name
   store-list [--search Q]        list template-store templates
   store-get <template> [--yaml]  template inputs/quota (and source YAML)
+  store-export <template> --out F  write a store template's source to a file
   instances                      list deployed template instances
   delete <instance>              delete an instance and all its resources
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -43,9 +45,26 @@ KNOWN_REGIONS = [
 
 SEALOS_DIR = os.path.expanduser("~/.sealos")
 AUTH_PATH = os.path.join(SEALOS_DIR, "auth.json")
-KUBECONFIG_PATH = os.environ.get(
-    "SEALOS_KUBECONFIG", os.path.join(SEALOS_DIR, "kubeconfig")
-)
+DEFAULT_KUBECONFIG_PATH = os.path.join(SEALOS_DIR, "kubeconfig")
+
+
+def resolve_kubeconfig_path():
+    """Explicit SEALOS_KUBECONFIG wins; then the login-owned default; then an
+    ambient KUBECONFIG (e.g. injected into a managed sandbox) if it exists."""
+    explicit = os.environ.get("SEALOS_KUBECONFIG")
+    if explicit:
+        return explicit
+    if os.path.exists(DEFAULT_KUBECONFIG_PATH):
+        return DEFAULT_KUBECONFIG_PATH
+    ambient = os.environ.get("KUBECONFIG")
+    if ambient and os.path.exists(ambient):
+        return ambient
+    return DEFAULT_KUBECONFIG_PATH
+
+
+KUBECONFIG_PATH = resolve_kubeconfig_path()
+# `login`/`switch` never write to an ambient KUBECONFIG.
+KUBECONFIG_WRITE_PATH = os.environ.get("SEALOS_KUBECONFIG") or DEFAULT_KUBECONFIG_PATH
 
 
 def fail(message, **extra):
@@ -117,9 +136,9 @@ def region_domain():
 
 def save_credentials(region, access_token, regional_token, kubeconfig, workspace):
     os.makedirs(SEALOS_DIR, exist_ok=True)
-    with open(KUBECONFIG_PATH, "w") as f:
+    with open(KUBECONFIG_WRITE_PATH, "w") as f:
         f.write(kubeconfig)
-    os.chmod(KUBECONFIG_PATH, 0o600)
+    os.chmod(KUBECONFIG_WRITE_PATH, 0o600)
     auth = {
         "region": region,
         "access_token": access_token,
@@ -251,7 +270,7 @@ def cmd_login(args):
                 "authenticated": True,
                 "region": region,
                 "workspace": (workspace or {}).get("id"),
-                "kubeconfig": KUBECONFIG_PATH,
+                "kubeconfig": KUBECONFIG_WRITE_PATH,
             },
             indent=2,
         )
@@ -357,14 +376,18 @@ def cmd_deploy(args):
         yaml_text = f.read()
 
     deploy_args = parse_deploy_args(args)
+    extra_labels = parse_extra_labels(args)
     kubeconfig = load_kubeconfig()
     domain = region_domain()
     url = f"https://template.{domain}/api/v2alpha/templates/raw"
+    body = {"yaml": yaml_text, "args": deploy_args, "dryRun": bool(args.dry_run)}
+    if extra_labels:
+        body["extraLabels"] = extra_labels
     status, resp = http_json(
         url,
         method="POST",
         headers={"Authorization": urllib.parse.quote(kubeconfig, safe="")},
-        data={"yaml": yaml_text, "args": deploy_args, "dryRun": bool(args.dry_run)},
+        data=body,
         timeout=120,
     )
     ok = status in (200, 201)
@@ -393,6 +416,26 @@ def parse_deploy_args(args):
     if not isinstance(deploy_args, dict):
         fail("deploy args must be a JSON object")
     return deploy_args
+
+
+def parse_extra_labels(args):
+    """Ownership labels attached to every deployed resource. Explicit
+    --labels-json wins; otherwise a managed control plane's
+    SEALAI_DEPLOY_LABELS_JSON is forwarded verbatim."""
+    raw = getattr(args, "labels_json", None) or os.environ.get(
+        "SEALAI_DEPLOY_LABELS_JSON"
+    )
+    if not raw:
+        return None
+    try:
+        labels = json.loads(raw)
+    except ValueError:
+        fail("extra labels are not valid JSON")
+    if not isinstance(labels, dict) or not all(
+        isinstance(k, str) and k and isinstance(v, str) for k, v in labels.items()
+    ):
+        fail("extra labels must be a JSON object of string values")
+    return labels or None
 
 
 def cmd_deploy_store(args):
@@ -445,6 +488,43 @@ def cmd_store_get(args):
         else:
             out["yaml_error"] = f"getTemplateSource failed ({status})"
     print(json.dumps(out, indent=2))
+
+
+def cmd_store_export(args):
+    """Materialize a store template's source (Template CR + resources) into a
+    single local file, ready for a raw deploy or a managed-mode handshake."""
+    domain = region_domain()
+    status, src = http_json(
+        f"https://template.{domain}/api/getTemplateSource"
+        f"?templateName={urllib.parse.quote(args.template)}&includeReadme=false",
+        headers={"Authorization": urllib.parse.quote(load_kubeconfig(), safe="")},
+        timeout=30,
+    )
+    if status != 200 or not isinstance(src, dict):
+        fail(f"getTemplateSource failed ({status})", response=str(src)[:500])
+    data = src.get("data") or {}
+    template_yaml = (data.get("templateYaml") or "").strip("\n")
+    app_yaml = (data.get("appYaml") or "").strip("\n")
+    if "app.sealos.io/v1" not in template_yaml or "kind: Template" not in template_yaml:
+        fail("template source is missing the app.sealos.io/v1 Template header")
+    if not app_yaml:
+        fail("template source has no resource documents")
+    combined = template_yaml + "\n---\n" + app_yaml + "\n"
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)) or ".", exist_ok=True)
+    with open(args.out, "w") as f:
+        f.write(combined)
+    print(
+        json.dumps(
+            {
+                "success": True,
+                "template": args.template,
+                "out": args.out,
+                "bytes": len(combined.encode()),
+                "sha256": hashlib.sha256(combined.encode()).hexdigest(),
+            },
+            indent=2,
+        )
+    )
 
 
 def cmd_instances(_args):
@@ -535,6 +615,11 @@ def main():
     p.add_argument("template", help="path to a Sealos template YAML")
     p.add_argument("--args-json", help="deploy inputs as a JSON object string")
     p.add_argument("--args-file", help="deploy inputs as a JSON file (use for secrets)")
+    p.add_argument(
+        "--labels-json",
+        help="extra ownership labels as a JSON object string "
+        "(default: SEALAI_DEPLOY_LABELS_JSON when set)",
+    )
     p.add_argument("--dry-run", action="store_true")
 
     p = sub.add_parser("deploy-store")
@@ -549,6 +634,10 @@ def main():
     p = sub.add_parser("store-get")
     p.add_argument("template", help="template-store template name")
     p.add_argument("--yaml", action="store_true", help="include template source YAML")
+
+    p = sub.add_parser("store-export")
+    p.add_argument("template", help="template-store template name")
+    p.add_argument("--out", required=True, help="output path for the combined YAML")
 
     sub.add_parser("instances")
 
@@ -565,6 +654,7 @@ def main():
         "deploy-store": cmd_deploy_store,
         "store-list": cmd_store_list,
         "store-get": cmd_store_get,
+        "store-export": cmd_store_export,
         "instances": cmd_instances,
         "delete": cmd_delete,
     }[args.command](args)

@@ -53,6 +53,11 @@ project working directory.
 
 ## Preflight
 
+If `SEALAI_DEPLOY_MODE` is `managed` (a Brain-managed sandbox), stop here and
+follow [../sealos-deploy/SKILL.md](../sealos-deploy/SKILL.md) instead — that
+mode forbids login and interactive prompts. Everything below is the local
+interactive path.
+
 ```bash
 python3 scripts/sealos-api.py status
 ```
@@ -120,6 +125,7 @@ python3 scripts/sealos-api.py store-list --search <query>     # template store
 | Manifest rules when writing template YAML (labels, Ingress, storage, quota ladder, object storage) | [platform.md](references/platform.md) |
 | Status, logs, debugging, scaling, deletion, cost hygiene | [operate.md](references/operate.md) |
 | Per-app recipes for popular self-hosted software | [recipes.md](references/recipes.md) |
+| Brain managed sandbox (`SEALAI_DEPLOY_MODE=managed`) | [../sealos-deploy/SKILL.md](../sealos-deploy/SKILL.md) |
 
 Load only what the task needs — usually one reference, two at most.
 

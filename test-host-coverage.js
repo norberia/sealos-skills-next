@@ -67,6 +67,34 @@ describe('host coverage', () => {
     assert.match(skill, /^---\nname: use-sealos\n/)
   })
 
+  it('Brain managed pack: sealos-deploy and k8s-kaniko-job are installable siblings', () => {
+    // Brain's installer hard-requires these two skill directory names to
+    // exist after `npx skills add`; both must sit next to use-sealos so the
+    // skills CLI discovers all three on every code path.
+    for (const name of ['sealos-deploy', 'k8s-kaniko-job']) {
+      const canonical = join(root, 'plugins/sealos/skills', name)
+      const entry = join(root, 'skills', name)
+      assert.equal(lstatSync(entry).isSymbolicLink(), true, name)
+      assert.equal(realpathSync(entry), realpathSync(canonical), name)
+      const skill = readFileSync(join(canonical, 'SKILL.md'), 'utf8')
+      assert.match(skill, new RegExp(`^---\\nname: ${name}\\n`), name)
+    }
+    const deploySkill = readFileSync(
+      join(root, 'plugins/sealos/skills/sealos-deploy/SKILL.md'),
+      'utf8',
+    )
+    // Managed contract essentials Brain depends on.
+    assert.match(deploySkill, /SEALAI_DEPLOY_MODE/)
+    assert.match(deploySkill, /template_ready/)
+    assert.match(deploySkill, /deployment_completed/)
+    assert.match(deploySkill, /\.sealos\/template\/index\.yaml/)
+    assert.match(deploySkill, /SEALAI_INPUTS_PATH/)
+    // The interactive skill routes managed sandboxes away from login.
+    const useSkill = readFileSync(join(canonicalSkill, 'SKILL.md'), 'utf8')
+    assert.match(useSkill, /SEALAI_DEPLOY_MODE/)
+    assert.match(useSkill, /\.\.\/sealos-deploy\/SKILL\.md/)
+  })
+
   it('README documents the six added hosts', () => {
     const readme = readFileSync(join(root, 'README.md'), 'utf8')
     for (const needle of [
