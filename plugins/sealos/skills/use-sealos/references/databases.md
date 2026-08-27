@@ -32,6 +32,7 @@ metadata:
     kb.io/database: postgresql-16.4.0
     clusterdefinition.kubeblocks.io/name: postgresql
     clusterversion.kubeblocks.io/name: postgresql-16.4.0
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   affinity:
     podAntiAffinity: Preferred
@@ -64,6 +65,7 @@ metadata:
     sealos-db-provider-cr: ${{ defaults.app_name }}-pg
     app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
     app.kubernetes.io/managed-by: kbcli
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -73,6 +75,7 @@ metadata:
     sealos-db-provider-cr: ${{ defaults.app_name }}-pg
     app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
     app.kubernetes.io/managed-by: kbcli
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 rules:
   - apiGroups: ['*']
     resources: ['*']
@@ -86,6 +89,7 @@ metadata:
     sealos-db-provider-cr: ${{ defaults.app_name }}-pg
     app.kubernetes.io/instance: ${{ defaults.app_name }}-pg
     app.kubernetes.io/managed-by: kbcli
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -97,7 +101,9 @@ subjects:
 
 Every database resource carries the same three labels (`sealos-db-provider-cr`,
 `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by: kbcli`) set to its
-own cluster name.
+own cluster name. Also set `cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}`
+on each resource's `metadata.labels` (not on pod templates). Brain adoption
+lists by this label. Do not change the KubeBlocks identity labels.
 
 ## Engine-specific Cluster differences
 
@@ -130,6 +136,8 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: ${{ defaults.app_name }}-pg-init
+  labels:
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 300

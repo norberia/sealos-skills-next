@@ -40,6 +40,8 @@ jobs:
           fi
           printf 'compiling %s\n' "${scripts[@]}"
           python3 -m py_compile "${scripts[@]}"
+      - name: Unit tests
+        run: python3 -m unittest discover -s plugins/sealos/skills/use-sealos/scripts -p 'test_*.py' -v
 
   manifests:
     name: Manifests
