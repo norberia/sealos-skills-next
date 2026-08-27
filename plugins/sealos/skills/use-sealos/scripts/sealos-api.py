@@ -17,6 +17,7 @@ Commands:
   deploy-store <template> [...]  deploy a template-store template by name
   adopt <instance> [--template-name NAME]
                                  claim an existing instance as a Brain Project
+                                 (no-op outside *.sealos.io regions)
   store-list [--search Q]        list template-store templates
   store-get <template> [--yaml]  template inputs/quota (and source YAML)
   store-export <template> --out F  write a store template's source to a file
@@ -484,10 +485,19 @@ def is_brain_managed_deploy():
     return bool(os.environ.get("SEALAI_DEPLOY_TASK_ID") or os.environ.get("SEALAI_PROJECT_ID"))
 
 
+def is_brain_adoption_region(domain):
+    """Brain only runs on international Sealos (*.sealos.io), not China (*.sealos.run)."""
+    host = (domain or "").strip().lower().rstrip(".")
+    return host == "sealos.io" or host.endswith(".sealos.io")
+
+
 def maybe_adopt_template_instance(instance_name, template_name=None, dry_run=False):
     """POST Brain adopt-template-instance, or skip. HTTP failures are returned, not raised."""
     if dry_run:
         return _brain_adoption_skipped("dry-run")
+    domain = region_domain()
+    if not is_brain_adoption_region(domain):
+        return _brain_adoption_skipped("not-sealos-io")
     if is_brain_managed_deploy():
         return _brain_adoption_skipped("managed")
     if not instance_name:
@@ -496,7 +506,7 @@ def maybe_adopt_template_instance(instance_name, template_name=None, dry_run=Fal
             error="could not determine instance name from the Template API response",
         )
     kubeconfig = load_kubeconfig()
-    url = f"https://brain.{region_domain()}/api/projects/adopt-template-instance"
+    url = f"https://brain.{domain}/api/projects/adopt-template-instance"
     headers = {"Authorization": f"Bearer {urllib.parse.quote(kubeconfig, safe='')}"}
     body = {"instanceName": instance_name}
     if template_name:
@@ -620,9 +630,11 @@ def cmd_deploy_store(args):
 def cmd_adopt(args):
     result = maybe_adopt_template_instance(args.instance, template_name=args.template_name)
     print(json.dumps({"instance": args.instance, "brain_adoption": result}, indent=2))
-    if result.get("skipped") and result.get("reason") == "managed":
+    if result.get("skipped"):
+        if result.get("error"):
+            sys.exit(1)
         return
-    if result.get("skipped") or not result.get("ok"):
+    if not result.get("ok"):
         sys.exit(1)
 
 
@@ -790,7 +802,10 @@ def main():
     p.add_argument("--args-file", help="template inputs as a JSON file (use for secrets)")
 
     p = sub.add_parser("adopt")
-    p.add_argument("instance", help="template instance name to claim as a Brain Project")
+    p.add_argument(
+        "instance",
+        help="template instance name to claim as a Brain Project (*.sealos.io only)",
+    )
     p.add_argument(
         "--template-name",
         help="optional template name for the Brain Project display name",

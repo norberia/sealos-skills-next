@@ -159,7 +159,8 @@ python3 <this-skill>/../use-sealos/scripts/sealos-api.py deploy \
 - Do **not** call `sealos-api.py adopt` (and do not POST
   `adopt-template-instance`). Managed deploys already stamp `brain.io/*` via
   extraLabels; a second claim returns 409. The script skips adoption when
-  `SEALAI_DEPLOY_TASK_ID` or `SEALAI_PROJECT_ID` is set.
+  `SEALAI_DEPLOY_TASK_ID` or `SEALAI_PROJECT_ID` is set, and when the region
+  is not `*.sealos.io`.
 - Quota or validation errors: fix the template (re-run step 4 — the hash
   changed) or report the failure via the normal repair loop. Never shrink
   resources silently.

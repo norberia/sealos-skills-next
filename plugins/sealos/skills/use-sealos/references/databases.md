@@ -102,8 +102,9 @@ subjects:
 Every database resource carries the same three labels (`sealos-db-provider-cr`,
 `app.kubernetes.io/instance`, `app.kubernetes.io/managed-by: kbcli`) set to its
 own cluster name. Also set `cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}`
-on each resource's `metadata.labels` (not on pod templates). Brain adoption
-lists by this label. Do not change the KubeBlocks identity labels.
+on each resource's `metadata.labels` (not on pod templates). Sealos groups the
+instance by this label; Brain adoption on `*.sealos.io` lists by it too. Do
+not change the KubeBlocks identity labels.
 
 ## Engine-specific Cluster differences
 

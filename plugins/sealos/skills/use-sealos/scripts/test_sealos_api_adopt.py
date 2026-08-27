@@ -55,7 +55,7 @@ class AdoptTests(unittest.TestCase):
         self.sleep = self.sleep_patch.start()
         self.kc_patch = patch.object(api, "load_kubeconfig", return_value="apiVersion: v1")
         self.kc_patch.start()
-        self.domain_patch = patch.object(api, "region_domain", return_value="gzg.sealos.run")
+        self.domain_patch = patch.object(api, "region_domain", return_value="usw-1.sealos.io")
         self.domain_patch.start()
 
     def tearDown(self):
@@ -91,6 +91,27 @@ class AdoptTests(unittest.TestCase):
         self.assertEqual(result["reason"], "managed")
         self.assertEqual(http.calls, [])
 
+    def test_skip_when_region_is_sealos_run(self):
+        self.domain_patch.stop()
+        self.domain_patch = patch.object(api, "region_domain", return_value="gzg.sealos.run")
+        self.domain_patch.start()
+        http = FakeHttp([])
+        result = self._adopt(http=http)
+        self.assertEqual(result["skipped"], True)
+        self.assertEqual(result["reason"], "not-sealos-io")
+        self.assertIsNone(result["ok"])
+        self.assertEqual(http.calls, [])
+
+    def test_skip_sealos_run_even_when_managed_env_set(self):
+        os.environ["SEALAI_PROJECT_ID"] = "proj-1"
+        self.domain_patch.stop()
+        self.domain_patch = patch.object(api, "region_domain", return_value="bja.sealos.run")
+        self.domain_patch.start()
+        http = FakeHttp([])
+        result = self._adopt(http=http)
+        self.assertEqual(result["reason"], "not-sealos-io")
+        self.assertEqual(http.calls, [])
+
     def test_skip_dry_run(self):
         http = FakeHttp([])
         result = self._adopt(dry_run=True, http=http)
@@ -110,7 +131,7 @@ class AdoptTests(unittest.TestCase):
         self.assertEqual(call["method"], "POST")
         self.assertEqual(
             call["url"],
-            "https://brain.gzg.sealos.run/api/projects/adopt-template-instance",
+            "https://brain.usw-1.sealos.io/api/projects/adopt-template-instance",
         )
         self.assertEqual(
             call["data"],
@@ -155,7 +176,7 @@ class AdoptTests(unittest.TestCase):
     def test_transport_failure_then_200_retries(self):
         http = FakeHttp(
             [
-                (0, {"error": "request to https://brain.gzg.sealos.run failed"}),
+                (0, {"error": "request to https://brain.usw-1.sealos.io failed"}),
                 (200, ADOPT_OK),
             ]
         )
@@ -242,6 +263,44 @@ class AdoptTests(unittest.TestCase):
         self.assertEqual(out["brain_adoption"]["reason"], "dry-run")
         self.assertEqual(http.brain_calls(), [])
 
+    def test_deploy_skip_sealos_run_does_not_call_brain(self):
+        self.domain_patch.stop()
+        self.domain_patch = patch.object(api, "region_domain", return_value="hzh.sealos.run")
+        self.domain_patch.start()
+        http = FakeHttp([(201, {"name": "demo-abc"})])
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "t.yaml")
+            with open(path, "w") as f:
+                f.write("apiVersion: app.sealos.io/v1\nkind: Template\nmetadata:\n  name: demo\n")
+            args = argparse.Namespace(
+                template=path,
+                args_json=None,
+                args_file=None,
+                labels_json=None,
+                dry_run=False,
+            )
+            buf = io.StringIO()
+            with patch.object(api, "http_json", http), contextlib.redirect_stdout(buf):
+                api.cmd_deploy(args)
+        out = json.loads(buf.getvalue())
+        self.assertTrue(out["success"])
+        self.assertEqual(out["brain_adoption"]["reason"], "not-sealos-io")
+        self.assertEqual(len(http.template_calls()), 1)
+        self.assertEqual(http.brain_calls(), [])
+
+    def test_adopt_subcommand_zero_on_sealos_run(self):
+        self.domain_patch.stop()
+        self.domain_patch = patch.object(api, "region_domain", return_value="gzg.sealos.run")
+        self.domain_patch.start()
+        http = FakeHttp([])
+        args = argparse.Namespace(instance="foo", template_name=None)
+        buf = io.StringIO()
+        with patch.object(api, "http_json", http), contextlib.redirect_stdout(buf):
+            api.cmd_adopt(args)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["brain_adoption"]["reason"], "not-sealos-io")
+        self.assertEqual(http.calls, [])
+
     def test_adopt_subcommand_nonzero_on_502(self):
         http = FakeHttp([(502, {"error": "label failed"})] * api.ADOPT_MAX_ATTEMPTS)
         args = argparse.Namespace(instance="foo", template_name=None)
@@ -282,6 +341,24 @@ class AdoptTests(unittest.TestCase):
         self.assertEqual(out["brain_adoption"]["reason"], "missing-instance-name")
         self.assertTrue(out["brain_adoption"]["skipped"])
         self.assertEqual(http.brain_calls(), [])
+
+
+class BrainRegionTests(unittest.TestCase):
+    def test_io_regions_enabled(self):
+        for domain in ("usw-1.sealos.io", "sealos.io", "USW-1.SEALOS.IO", "usw-1.sealos.io."):
+            self.assertTrue(api.is_brain_adoption_region(domain), domain)
+
+    def test_run_and_other_hosts_disabled(self):
+        for domain in (
+            "gzg.sealos.run",
+            "bja.sealos.run",
+            "hzh.sealos.run",
+            "evil.sealos.io.example.com",
+            "notsealos.io",
+            "",
+            None,
+        ):
+            self.assertFalse(api.is_brain_adoption_region(domain), domain)
 
 
 if __name__ == "__main__":

@@ -44,15 +44,16 @@ For self-hosted products missing from the store, and for user images built via
    ```
 4. **Deploy** (drop `--dry-run`). The response `name` is the instance name.
 
-## Brain project (local deploys)
+## Brain project (local deploys on `*.sealos.io`)
 
-After a successful Template API apply, `sealos-api.py` claims the instance as
+Brain only exists on international Sealos (`*.sealos.io`, e.g. `usw-1`). After
+a successful Template API apply there, `sealos-api.py` claims the instance as
 a Brain Project (`brain_adoption` on stdout). Retry with
 `python3 scripts/sealos-api.py adopt <instance>` when `brain_adoption.ok` is
 false, **or** when `warnings` still contains `incompleteResourceSet` after
-verification — never redeploy (that creates a second Instance). Brain managed
-mode (`SEALAI_DEPLOY_TASK_ID` / `SEALAI_PROJECT_ID`) skips this; those deploys
-already stamp `extraLabels`.
+verification — never redeploy (that creates a second Instance). Skip adoption
+when the current region is `*.sealos.run`, or when Brain managed mode
+(`SEALAI_DEPLOY_TASK_ID` / `SEALAI_PROJECT_ID`) already stamped `extraLabels`.
 
 ## Verify (every path, no exceptions)
 

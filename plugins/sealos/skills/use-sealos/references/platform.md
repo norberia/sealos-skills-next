@@ -93,8 +93,9 @@ spec:
   (`${{ defaults.app_name }}-worker`) with their own matching labels.
 - Also set `cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}` on
   each namespaced resource's `metadata.labels` (workloads, Service, Ingress,
-  App, ConfigMap, ObjectStorageBucket, …). Brain adoption lists by this
-  label. Never put it on `spec.template.metadata.labels`.
+  App, ConfigMap, ObjectStorageBucket, …). Sealos groups the instance by this
+  label; Brain adoption on `*.sealos.io` lists by it too. Never put it on
+  `spec.template.metadata.labels`.
 - Multi-component apps: give EVERY workload its own matching name/labels, talk
   between services via FQDN
   `<service>.${{ SEALOS_NAMESPACE }}.svc.cluster.local`, never bare service
