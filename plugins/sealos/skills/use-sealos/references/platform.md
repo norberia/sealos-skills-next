@@ -65,6 +65,7 @@ metadata:
   labels:
     app: ${{ defaults.app_name }}
     cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   replicas: 1
   revisionHistoryLimit: 1
@@ -90,6 +91,11 @@ spec:
   and the main container name must all be identical. The main component is
   `${{ defaults.app_name }}`; extra components append a suffix
   (`${{ defaults.app_name }}-worker`) with their own matching labels.
+- Also set `cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}` on
+  each namespaced resource's `metadata.labels` (workloads, Service, Ingress,
+  App, ConfigMap, ObjectStorageBucket, …). Sealos groups the instance by this
+  label; Brain adoption on `*.sealos.io` lists by it too. Never put it on
+  `spec.template.metadata.labels`.
 - Multi-component apps: give EVERY workload its own matching name/labels, talk
   between services via FQDN
   `<service>.${{ SEALOS_NAMESPACE }}.svc.cluster.local`, never bare service
@@ -128,6 +134,8 @@ ladder step at a time.
 volumeClaimTemplates:
   - metadata:
       name: vn-varvn-libvn-data
+      labels:
+        cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
       annotations:
         path: /var/lib/data
         value: '1'
@@ -141,7 +149,8 @@ volumeClaimTemplates:
 ## ConfigMap contract
 
 One ConfigMap per workload, named exactly like the workload, same `app` +
-`cloud.sealos.io/app-deploy-manager` labels. Each data key is the mount path
+`cloud.sealos.io/app-deploy-manager` + `cloud.sealos.io/deploy-on-sealos`
+labels. Each data key is the mount path
 with `/`, `-`, `.` replaced by `vn-`; mount each key with `subPath` equal to
 the key and a single volume named `<workload>-cm`:
 
@@ -170,6 +179,7 @@ metadata:
   labels:
     app: ${{ defaults.app_name }}
     cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   ports:
     - port: 3000
@@ -191,6 +201,7 @@ metadata:
     app: ${{ defaults.app_name }}
     cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
     cloud.sealos.io/app-deploy-manager-domain: ${{ defaults.app_host }}
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
   annotations:
     kubernetes.io/ingress.class: nginx
     nginx.ingress.kubernetes.io/proxy-body-size: 32m
@@ -237,6 +248,7 @@ metadata:
   name: ${{ defaults.app_name }}
   labels:
     cloud.sealos.io/app-deploy-manager: ${{ defaults.app_name }}
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   data:
     url: https://${{ defaults.app_host }}.${{ SEALOS_CLOUD_DOMAIN }}
@@ -256,6 +268,8 @@ apiVersion: objectstorage.sealos.io/v1
 kind: ObjectStorageBucket
 metadata:
   name: ${{ defaults.app_name }}
+  labels:
+    cloud.sealos.io/deploy-on-sealos: ${{ defaults.app_name }}
 spec:
   policy: private        # private | publicRead | publicReadwrite
 ```

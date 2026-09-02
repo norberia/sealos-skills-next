@@ -101,6 +101,13 @@ After ANY deploy, verify before reporting:
 bash scripts/wait-app.sh -u https://<host>.<region-domain> deployment/<name> [cluster/<name>-pg ...]
 ```
 
+On `*.sealos.io` regions, local deploys also claim a Brain Project in-script;
+if `brain_adoption.ok` is false, or `warnings` still lists
+`incompleteResourceSet` after verify, run `sealos-api.py adopt <instance>` —
+never redeploy. On `*.sealos.run` this is skipped
+(`brain_adoption.reason: not-sealos-io`). See
+[deploy.md](references/deploy.md).
+
 ## Quick operations
 
 ```bash

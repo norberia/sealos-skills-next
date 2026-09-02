@@ -15,6 +15,9 @@ Commands:
   switch <workspace>             switch workspace, refresh kubeconfig
   deploy <template.yaml> [...]   deploy a local template YAML
   deploy-store <template> [...]  deploy a template-store template by name
+  adopt <instance> [--template-name NAME]
+                                 claim an existing instance as a Brain Project
+                                 (no-op outside *.sealos.io regions)
   store-list [--search Q]        list template-store templates
   store-get <template> [--yaml]  template inputs/quota (and source YAML)
   store-export <template> --out F  write a store template's source to a file
@@ -72,7 +75,7 @@ def fail(message, **extra):
     sys.exit(1)
 
 
-def http_json(url, method="GET", headers=None, data=None, form=None, timeout=30):
+def http_json(url, method="GET", headers=None, data=None, form=None, timeout=30, fatal=True):
     """Make an HTTP request; return (status, parsed-json-or-text)."""
     body = None
     headers = dict(headers or {})
@@ -91,6 +94,8 @@ def http_json(url, method="GET", headers=None, data=None, form=None, timeout=30)
         text = e.read().decode(errors="replace")
         status = e.code
     except (urllib.error.URLError, TimeoutError) as e:
+        if not fatal:
+            return 0, {"error": f"request to {url} failed: {e}"}
         fail(f"request to {url} failed: {e}")
     try:
         return status, json.loads(text)
@@ -369,6 +374,155 @@ def cmd_switch(args):
     print(json.dumps({"switched": True, "workspace": workspace}, indent=2))
 
 
+# 0 = transport failure from http_json(..., fatal=False)
+ADOPT_RETRY_STATUSES = frozenset({0, 404, 502, 503})
+ADOPT_MAX_ATTEMPTS = 4
+ADOPT_RETRY_SLEEP_SECONDS = 3
+
+
+def extract_instance_name(resp, fallback=None):
+    """Instance name from a Template API response, or *fallback* if missing."""
+
+    def pick(*vals):
+        for val in vals:
+            if isinstance(val, str) and val.strip():
+                return val.strip()
+        return None
+
+    found = None
+    if isinstance(resp, dict):
+        data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+        meta = resp.get("metadata") if isinstance(resp.get("metadata"), dict) else {}
+        data_meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+        found = pick(
+            resp.get("instanceName"),
+            resp.get("name"),
+            data.get("instanceName"),
+            data.get("name"),
+            data_meta.get("name"),
+            meta.get("name"),
+        )
+    return found or pick(fallback)
+
+
+def template_name_from_yaml(yaml_text):
+    """Best-effort Template CR metadata.name from the first YAML document."""
+    if not yaml_text:
+        return None
+    first = yaml_text.split("\n---", 1)[0]
+    if not re.search(r"^kind:\s*Template\s*$", first, re.MULTILINE):
+        return None
+    meta = re.search(r"^metadata:\s*$", first, re.MULTILINE)
+    if not meta:
+        return None
+    rest = first[meta.end() :]
+    top = re.search(r"^[^:\s#][^:]*:", rest, re.MULTILINE)
+    block = rest[: top.start()] if top else rest
+    match = re.search(r"^  name:\s*[\"']?([^\"'\s]+)[\"']?\s*$", block, re.MULTILINE)
+    if not match:
+        return None
+    name = match.group(1)
+    if "${{" in name:
+        return None
+    return name
+
+
+def _brain_adoption_skipped(reason, error=None, ok=None):
+    return {
+        "skipped": True,
+        "reason": reason,
+        "ok": ok,
+        "status": None,
+        "projectId": None,
+        "warnings": [],
+        "error": error,
+    }
+
+
+def _adoption_warnings(body):
+    if not isinstance(body, dict):
+        return []
+    adoption = body.get("adoption") if isinstance(body.get("adoption"), dict) else {}
+    warnings = adoption.get("warnings") or []
+    return warnings if isinstance(warnings, list) else []
+
+
+def _adoption_error(status, body):
+    if isinstance(body, dict) and body.get("error"):
+        return str(body["error"])
+    if isinstance(body, str) and body.strip():
+        return body.strip()[:500]
+    return f"adopt-template-instance failed ({status})"
+
+
+def _should_retry_adopt(status, body, attempt):
+    if attempt >= ADOPT_MAX_ATTEMPTS:
+        return False
+    if status in ADOPT_RETRY_STATUSES:
+        return True
+    if status == 200 and "incompleteResourceSet" in _adoption_warnings(body):
+        return True
+    return False
+
+
+def _adoption_result(status, body):
+    warnings = _adoption_warnings(body)
+    project = body.get("project") if isinstance(body, dict) else None
+    project_id = project.get("id") if isinstance(project, dict) else None
+    ok = status == 200
+    return {
+        "skipped": False,
+        "reason": None,
+        "ok": ok,
+        "status": status,
+        "projectId": project_id,
+        "warnings": warnings,
+        "error": None if ok else _adoption_error(status, body),
+    }
+
+
+def is_brain_managed_deploy():
+    return bool(os.environ.get("SEALAI_DEPLOY_TASK_ID") or os.environ.get("SEALAI_PROJECT_ID"))
+
+
+def is_brain_adoption_region(domain):
+    """Brain only runs on international Sealos (*.sealos.io), not China (*.sealos.run)."""
+    host = (domain or "").strip().lower().rstrip(".")
+    return host == "sealos.io" or host.endswith(".sealos.io")
+
+
+def maybe_adopt_template_instance(instance_name, template_name=None, dry_run=False):
+    """POST Brain adopt-template-instance, or skip. HTTP failures are returned, not raised."""
+    if dry_run:
+        return _brain_adoption_skipped("dry-run")
+    domain = region_domain()
+    if not is_brain_adoption_region(domain):
+        return _brain_adoption_skipped("not-sealos-io")
+    if is_brain_managed_deploy():
+        return _brain_adoption_skipped("managed")
+    if not instance_name:
+        return _brain_adoption_skipped(
+            "missing-instance-name",
+            error="could not determine instance name from the Template API response",
+        )
+    kubeconfig = load_kubeconfig()
+    url = f"https://brain.{domain}/api/projects/adopt-template-instance"
+    headers = {"Authorization": f"Bearer {urllib.parse.quote(kubeconfig, safe='')}"}
+    body = {"instanceName": instance_name}
+    if template_name:
+        body["templateName"] = template_name
+    status, resp = 0, None
+    for attempt in range(1, ADOPT_MAX_ATTEMPTS + 1):
+        status, resp = http_json(
+            url, method="POST", headers=headers, data=body, timeout=60, fatal=False
+        )
+        if _should_retry_adopt(status, resp, attempt):
+            time.sleep(ADOPT_RETRY_SLEEP_SECONDS)
+            continue
+        break
+    return _adoption_result(status, resp)
+
+
 def cmd_deploy(args):
     if not os.path.exists(args.template):
         fail("template file not found", path=args.template)
@@ -398,6 +552,12 @@ def cmd_deploy(args):
         "deploy_url": url,
         "response": resp,
     }
+    if ok:
+        result["brain_adoption"] = maybe_adopt_template_instance(
+            extract_instance_name(resp),
+            template_name=template_name_from_yaml(yaml_text),
+            dry_run=bool(args.dry_run),
+        )
     print(json.dumps(result, indent=2))
     if not ok:
         sys.exit(1)
@@ -455,13 +615,26 @@ def cmd_deploy_store(args):
         data={"name": name, "template": args.template, "args": parse_deploy_args(args)},
         timeout=120,
     )
-    print(
-        json.dumps(
-            {"success": status in (200, 201), "status": status, "instance": name, "response": resp},
-            indent=2,
+    ok = status in (200, 201)
+    result = {"success": ok, "status": status, "instance": name, "response": resp}
+    if ok:
+        result["brain_adoption"] = maybe_adopt_template_instance(
+            extract_instance_name(resp, fallback=name),
+            template_name=args.template,
         )
-    )
-    if status not in (200, 201):
+    print(json.dumps(result, indent=2))
+    if not ok:
+        sys.exit(1)
+
+
+def cmd_adopt(args):
+    result = maybe_adopt_template_instance(args.instance, template_name=args.template_name)
+    print(json.dumps({"instance": args.instance, "brain_adoption": result}, indent=2))
+    if result.get("skipped"):
+        if result.get("error"):
+            sys.exit(1)
+        return
+    if not result.get("ok"):
         sys.exit(1)
 
 
@@ -628,6 +801,16 @@ def main():
     p.add_argument("--args-json", help="template inputs as a JSON object string")
     p.add_argument("--args-file", help="template inputs as a JSON file (use for secrets)")
 
+    p = sub.add_parser("adopt")
+    p.add_argument(
+        "instance",
+        help="template instance name to claim as a Brain Project (*.sealos.io only)",
+    )
+    p.add_argument(
+        "--template-name",
+        help="optional template name for the Brain Project display name",
+    )
+
     p = sub.add_parser("store-list")
     p.add_argument("--search", help="case-insensitive filter")
 
@@ -652,6 +835,7 @@ def main():
         "switch": cmd_switch,
         "deploy": cmd_deploy,
         "deploy-store": cmd_deploy_store,
+        "adopt": cmd_adopt,
         "store-list": cmd_store_list,
         "store-get": cmd_store_get,
         "store-export": cmd_store_export,
