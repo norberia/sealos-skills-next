@@ -41,7 +41,19 @@ jobs:
           printf 'compiling %s\n' "${scripts[@]}"
           python3 -m py_compile "${scripts[@]}"
       - name: Unit tests
-        run: python3 -m unittest discover -s plugins/sealos/skills/use-sealos/scripts -p 'test_*.py' -v
+        run: |
+          set -euo pipefail
+          # unittest only recurses into importable packages, so run discovery
+          # once per skill scripts dir instead of from plugins/sealos/skills.
+          mapfile -t dirs < <(find plugins/sealos/skills -path '*/scripts/test_*.py' -printf '%h\n' | sort -u)
+          if [[ "${#dirs[@]}" -eq 0 ]]; then
+            echo "No test_*.py found under plugins/sealos/skills/*/scripts."
+            exit 1
+          fi
+          for dir in "${dirs[@]}"; do
+            echo "== $dir"
+            python3 -m unittest discover -s "$dir" -p 'test_*.py' -v
+          done
 
   manifests:
     name: Manifests
