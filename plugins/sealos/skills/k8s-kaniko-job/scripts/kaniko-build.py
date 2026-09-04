@@ -776,7 +776,8 @@ def classify_job_state(job, pods, events, now):
         return "complete", None, None
     failed = job_condition(job, "Failed")
     if failed:
-        return "failed", "job_failed", f"{failed.get('reason', 'Failed')}: {failed.get('message', '')}".strip(": ")
+        detail = f"{failed.get('reason', 'Failed')}: {failed.get('message', '')}"
+        return "failed", "job_failed", detail.rstrip(": ")
 
     for pod in pods:
         name = (pod.get("metadata") or {}).get("name", "?")
@@ -811,11 +812,8 @@ def classify_job_state(job, pods, events, now):
                     created = parse_k8s_timestamp((pod.get("metadata") or {}).get("creationTimestamp"))
                     age = now - created if created is not None else 0
                     if age >= PENDING_GRACE_SECONDS:
-                        return (
-                            "failed",
-                            "unschedulable",
-                            f"pod {name} unschedulable for {int(age)}s: {condition.get('message', '')}".rstrip(": "),
-                        )
+                        detail = f"pod {name} unschedulable for {int(age)}s: {condition.get('message', '')}"
+                        return "failed", "unschedulable", detail.rstrip(": ")
 
     if not pods:
         for event in events:
@@ -840,10 +838,11 @@ def wait_for_job(namespace, job_name, wait_timeout, poll_interval=POLL_INTERVAL_
     started = time.monotonic()
     last_state = None
     while True:
-        job = kubectl_json(["get", "job", job_name, "-n", namespace, "-o", "json"])
-        if job is None:
-            job = {}
-        pods = (kubectl_json(["get", "pods", "-n", namespace, "-l", f"job-name={job_name}", "-o", "json"]) or {}).get("items") or []
+        job = kubectl_json(["get", "job", job_name, "-n", namespace, "-o", "json"]) or {}
+        pods = (
+            kubectl_json(["get", "pods", "-n", namespace, "-l", f"job-name={job_name}", "-o", "json"])
+            or {}
+        ).get("items") or []
         events = []
         if not pods:
             events = (
@@ -901,12 +900,14 @@ def main():
     parser.add_argument("--timeout", type=int, help=f"build seconds cap (max {MAX_BUILD_SECONDS})")
     parser.add_argument("--render-only", action="store_true",
                         help="print the Job manifest and exit; no kubectl, no tar upload")
-    parser.add_argument("--memory-limit", metavar="Q",
-                        help=f"exact memory limit (default: up to {RESOURCE_DEFAULTS['memory']['limit']}, fitted to quota)")
-    parser.add_argument("--cpu-limit", metavar="Q",
-                        help=f"exact cpu limit (default: up to {RESOURCE_DEFAULTS['cpu']['limit']}, fitted to quota)")
-    parser.add_argument("--ephemeral-limit", metavar="Q",
-                        help=f"exact ephemeral-storage limit (default: up to {RESOURCE_DEFAULTS['ephemeral-storage']['limit']}, fitted to quota)")
+    for flag, dimension in [
+        ("--memory-limit", "memory"), ("--cpu-limit", "cpu"), ("--ephemeral-limit", "ephemeral-storage"),
+    ]:
+        parser.add_argument(
+            flag, metavar="Q",
+            help=f"exact {dimension} limit (default: up to "
+                 f"{RESOURCE_DEFAULTS[dimension]['limit']}, fitted to the namespace quota)",
+        )
     args = parser.parse_args()
 
     image_repo, image_tag = validate_image(args.image)
