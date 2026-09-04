@@ -23,6 +23,16 @@ Usage:
   kaniko-build.py --image ghcr.io/<owner>/<repo>:<tag> [--context DIR]
                   [--dockerfile PATH] [--namespace NS] [--build-arg K=V ...]
                   [--runtime-file PATH] [--render-only] [--timeout SECONDS]
+                  [--memory-limit Q] [--cpu-limit Q] [--ephemeral-limit Q]
+
+Resources: the Job's requests/limits are sized to the namespace ResourceQuota
+(remaining = hard - used, tightest quota wins), never above the defaults and
+never below the floors. An explicit --*-limit is used verbatim and must fit.
+
+Waiting: the Job is polled (not `kubectl wait`) and the build fails fast on
+FailedCreate events, a pod Unschedulable for > PENDING_GRACE_SECONDS, an
+ErrImagePull/ImagePullBackOff/CreateContainerError kaniko container, a Failed
+pod, or a Failed Job condition.
 
 Output: one JSON object on stdout. Progress and diagnostics go to stderr.
 Success: {"success": true, "image": "<tag ref>", "digest": "sha256:...",
@@ -32,6 +42,7 @@ Success: {"success": true, "image": "<tag ref>", "digest": "sha256:...",
 import argparse
 import base64
 import calendar
+import decimal
 import json
 import os
 import re
@@ -55,6 +66,30 @@ DEFAULT_S3_PORT = "1319"
 TAR_EXCLUDES = [".git", ".sealos", ".versitygw-s3", ".versitygw-iam", ".versitygw-versioning"]
 DNS_LABEL_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")
 DIGEST_RE = re.compile(r"sha256:[a-f0-9]{64}")
+
+POLL_INTERVAL_SECONDS = 5
+PENDING_GRACE_SECONDS = 90
+# Kubelet-side container states that never resolve on their own.
+FATAL_WAITING_REASONS = frozenset(
+    {
+        "ErrImagePull",
+        "ImagePullBackOff",
+        "InvalidImageName",
+        "CreateContainerError",
+        "CreateContainerConfigError",
+    }
+)
+
+RESOURCE_DIMENSIONS = ("cpu", "memory", "ephemeral-storage")
+# Ceilings are the historical hard-coded values; floors are the smallest Job
+# that still stands a chance of finishing a typical kaniko build.
+RESOURCE_DEFAULTS = {
+    "cpu": {"request": "500m", "limit": "2", "request_floor": "100m", "limit_floor": "500m"},
+    "memory": {"request": "2Gi", "limit": "8Gi", "request_floor": "512Mi", "limit_floor": "1Gi"},
+    "ephemeral-storage": {
+        "request": "2Gi", "limit": "10Gi", "request_floor": "1Gi", "limit_floor": "2Gi",
+    },
+}
 
 
 def log(message):
@@ -437,10 +472,198 @@ def validate_build_arg(pair):
     return pair
 
 
+# ── resource fitting ─────────────────────────────────────
+
+QUANTITY_RE = re.compile(
+    r"^([0-9]+(?:\.[0-9]*)?|\.[0-9]+)([eE][+-]?[0-9]+)?(Ki|Mi|Gi|Ti|Pi|Ei|[mkMGTPE])?$"
+)
+BINARY_SUFFIXES = {"Ki": 1024, "Mi": 1024**2, "Gi": 1024**3, "Ti": 1024**4, "Pi": 1024**5, "Ei": 1024**6}
+DECIMAL_SUFFIXES = {"m": "0.001", "k": "1e3", "M": "1e6", "G": "1e9", "T": "1e12", "P": "1e15", "E": "1e18"}
+
+
+class ResourceFitError(Exception):
+    """The namespace quota cannot host even the smallest acceptable Job."""
+
+    def __init__(self, message, quota):
+        super().__init__(message)
+        self.quota = quota
+
+
+def parse_quantity(value, dimension):
+    """Kubernetes quantity -> integer canonical unit (millicores for cpu, bytes otherwise)."""
+    text = str(value).strip()
+    match = QUANTITY_RE.match(text)
+    if not match:
+        raise ValueError(f"invalid quantity: {value!r}")
+    number, exponent, suffix = match.groups()
+    amount = decimal.Decimal(number + (exponent or ""))
+    if suffix in BINARY_SUFFIXES:
+        amount *= BINARY_SUFFIXES[suffix]
+    elif suffix:
+        amount *= decimal.Decimal(DECIMAL_SUFFIXES[suffix])
+    if dimension == "cpu":
+        amount *= 1000
+    return int(amount.to_integral_value(rounding=decimal.ROUND_CEILING))
+
+
+def format_quantity(amount, dimension):
+    if dimension == "cpu":
+        return str(amount // 1000) if amount % 1000 == 0 else f"{amount}m"
+    for suffix in ("Gi", "Mi", "Ki"):
+        unit = BINARY_SUFFIXES[suffix]
+        if amount and amount % unit == 0:
+            return f"{amount // unit}{suffix}"
+    return str(amount)
+
+
+def quota_remaining(quotas):
+    """Per-dimension remaining quota from ResourceQuota objects.
+
+    Returns {"limits.<dim>" | "requests.<dim>": {"hard", "used", "remaining"}}
+    with integer canonical units. The bare `memory`/`cpu`/`ephemeral-storage`
+    keys are aliases for `requests.*`. When several quotas constrain the same
+    key the tightest remaining wins. Scoped quotas are treated as applying,
+    which can only make the fit more conservative.
+    """
+    remaining = {}
+    for quota in quotas:
+        status = quota.get("status") or {}
+        hard = status.get("hard") or (quota.get("spec") or {}).get("hard") or {}
+        used = status.get("used") or {}
+        for raw_key, hard_value in hard.items():
+            key = raw_key if "." in raw_key else f"requests.{raw_key}"
+            kind, _, dimension = key.partition(".")
+            if kind not in ("limits", "requests") or dimension not in RESOURCE_DIMENSIONS:
+                continue
+            try:
+                hard_amount = parse_quantity(hard_value, dimension)
+                used_amount = parse_quantity(used.get(raw_key, "0"), dimension)
+            except ValueError as e:
+                log(f"warning: ignoring quota {quota.get('metadata', {}).get('name')}: {e}")
+                continue
+            entry = {
+                "hard": hard_amount,
+                "used": used_amount,
+                "remaining": max(hard_amount - used_amount, 0),
+                "quota": (quota.get("metadata") or {}).get("name"),
+            }
+            if key not in remaining or entry["remaining"] < remaining[key]["remaining"]:
+                remaining[key] = entry
+    return remaining
+
+
+def describe_quota_entry(entry, dimension):
+    return {
+        "quota": entry["quota"],
+        "hard": format_quantity(entry["hard"], dimension),
+        "used": format_quantity(entry["used"], dimension),
+        "remaining": format_quantity(entry["remaining"], dimension),
+    }
+
+
+def fit_resources(remaining, overrides=None):
+    """Size the Job's requests/limits to the remaining quota.
+
+    Per dimension: limit = min(ceiling, remaining limits.<dim>) where the
+    ceiling is the default limit, or the --*-limit override which is then
+    also the floor (explicit values are honored verbatim or rejected).
+    request = min(default request, limit, remaining requests.<dim>), floored
+    at the request floor. Raises ResourceFitError when a floor does not fit.
+    Returns {"requests": {dim: str}, "limits": {dim: str}, "adjusted": [..]}.
+    """
+    overrides = overrides or {}
+    resources = {"requests": {}, "limits": {}, "adjusted": []}
+    for dimension in RESOURCE_DIMENSIONS:
+        defaults = RESOURCE_DEFAULTS[dimension]
+        override = overrides.get(dimension)
+        if override is not None:
+            limit_ceiling = limit_floor = parse_quantity(override, dimension)
+        else:
+            limit_ceiling = parse_quantity(defaults["limit"], dimension)
+            limit_floor = parse_quantity(defaults["limit_floor"], dimension)
+        limit = limit_ceiling
+        limit_quota = remaining.get(f"limits.{dimension}")
+        if limit_quota is not None and limit_quota["remaining"] < limit:
+            limit = limit_quota["remaining"]
+            resources["adjusted"].append(f"limits.{dimension}")
+        if limit < limit_floor:
+            source = "requested" if override is not None else "floor"
+            raise ResourceFitError(
+                f"namespace quota cannot fit the kaniko job: limits.{dimension} remaining "
+                f"{format_quantity(limit, dimension)} < {source} "
+                f"{format_quantity(limit_floor, dimension)}",
+                {f"limits.{dimension}": describe_quota_entry(limit_quota, dimension)},
+            )
+
+        request = min(parse_quantity(defaults["request"], dimension), limit)
+        request_floor = min(parse_quantity(defaults["request_floor"], dimension), limit)
+        request_quota = remaining.get(f"requests.{dimension}")
+        if request_quota is not None and request_quota["remaining"] < request:
+            request = request_quota["remaining"]
+            resources["adjusted"].append(f"requests.{dimension}")
+        if request < request_floor:
+            raise ResourceFitError(
+                f"namespace quota cannot fit the kaniko job: requests.{dimension} remaining "
+                f"{format_quantity(request, dimension)} < floor "
+                f"{format_quantity(request_floor, dimension)}",
+                {f"requests.{dimension}": describe_quota_entry(request_quota, dimension)},
+            )
+        resources["limits"][dimension] = format_quantity(limit, dimension)
+        resources["requests"][dimension] = format_quantity(request, dimension)
+    return resources
+
+
+def read_resource_quotas(namespace):
+    code, out, err = kubectl(["get", "resourcequota", "-n", namespace, "-o", "json"])
+    if code != 0:
+        log(f"warning: cannot read ResourceQuota in {namespace}; using defaults: {err.strip()[:200]}")
+        return []
+    try:
+        items = json.loads(out or "{}").get("items") or []
+    except ValueError:
+        log("warning: ResourceQuota output is not JSON; using defaults")
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
+def resolve_resources(namespace, overrides, consult_quota=True):
+    quotas = read_resource_quotas(namespace) if consult_quota else []
+    remaining = quota_remaining(quotas)
+    try:
+        resources = fit_resources(remaining, overrides)
+    except ResourceFitError as e:
+        fail(
+            str(e),
+            namespace=namespace,
+            quota=e.quota,
+            hint="free namespace quota or pass a smaller --memory-limit/--cpu-limit/--ephemeral-limit",
+        )
+    quota_note = (
+        f"quota {sorted({entry['quota'] for entry in remaining.values()})}"
+        if remaining
+        else "no ResourceQuota constraint" if consult_quota else "quota not consulted"
+    )
+    adjusted = f"; shrunk to fit: {', '.join(resources['adjusted'])}" if resources["adjusted"] else ""
+    log(
+        f"resources: requests {resources['requests']} limits {resources['limits']} "
+        f"({quota_note}{adjusted})"
+    )
+    return resources
+
+
+def render_resources(resources):
+    lines = []
+    for section in ("requests", "limits"):
+        lines.append(f"          {section}:")
+        for dimension in RESOURCE_DIMENSIONS:
+            lines.append(f"            {dimension}: {json.dumps(resources[section][dimension])}")
+    return "\n".join(lines)
+
+
 def render_job(
     *, job_name, namespace, service_account, kaniko_image, platform, context_uri,
     dockerfile, target_image, s3_endpoint, aws_region, registry_secret,
-    s3_env_lines, build_args, deadline_seconds,
+    s3_env_lines, build_args, deadline_seconds, resources,
 ):
     for name, value in [("namespace", namespace), ("job name", job_name)]:
         if not DNS_LABEL_RE.match(value) or len(value) > 63:
@@ -474,14 +697,7 @@ spec:
       - name: kaniko
         image: {kaniko_image}
         resources:
-          requests:
-            cpu: "500m"
-            memory: "2Gi"
-            ephemeral-storage: "2Gi"
-          limits:
-            cpu: "2"
-            memory: "8Gi"
-            ephemeral-storage: "10Gi"
+{render_resources(resources)}
         args:
         - {yaml_quote(f'--dockerfile={dockerfile}')}
         - {yaml_quote(f'--context={context_uri}')}
@@ -520,6 +736,9 @@ def collect_failure_diagnostics(namespace, job_name):
     for label, cmd in [
         ("job", ["get", "job", job_name, "-n", namespace, "-o", "jsonpath={.status}"]),
         ("pods", ["get", "pods", "-n", namespace, "-l", f"job-name={job_name}", "-o", "wide"]),
+        ("events", ["get", "events", "-n", namespace, "--field-selector",
+                    f"involvedObject.name={job_name}", "-o",
+                    "custom-columns=LAST:.lastTimestamp,REASON:.reason,MESSAGE:.message"]),
         ("logs", ["logs", f"job/{job_name}", "-n", namespace, "--tail=60"]),
     ]:
         _, out, err = kubectl(cmd)
@@ -527,6 +746,128 @@ def collect_failure_diagnostics(namespace, job_name):
         if text:
             diagnostics.append(f"--- {label} ---\n{text[:3000]}")
     return "\n".join(diagnostics)
+
+
+# ── job watching ─────────────────────────────────────────
+
+
+def parse_k8s_timestamp(value):
+    try:
+        return calendar.timegm(time.strptime(str(value)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return None
+
+
+def job_condition(job, condition_type):
+    for condition in ((job.get("status") or {}).get("conditions") or []):
+        if condition.get("type") == condition_type and condition.get("status") == "True":
+            return condition
+    return None
+
+
+def classify_job_state(job, pods, events, now):
+    """Decide whether to keep waiting. Pure: inputs are kubectl JSON objects.
+
+    Returns (state, reason, detail) with state in {"complete", "failed",
+    "waiting"}. `reason` is a stable code for the failure JSON; `detail` is
+    the human-readable message pulled from the cluster.
+    """
+    if job_condition(job, "Complete"):
+        return "complete", None, None
+    failed = job_condition(job, "Failed")
+    if failed:
+        return "failed", "job_failed", f"{failed.get('reason', 'Failed')}: {failed.get('message', '')}".strip(": ")
+
+    for pod in pods:
+        name = (pod.get("metadata") or {}).get("name", "?")
+        status = pod.get("status") or {}
+        phase = status.get("phase")
+        if phase == "Failed":
+            detail = status.get("message") or status.get("reason") or ""
+            for cs in status.get("containerStatuses") or []:
+                terminated = (cs.get("state") or {}).get("terminated") or {}
+                if terminated:
+                    detail = (
+                        f"container {cs.get('name')} exited {terminated.get('exitCode')} "
+                        f"({terminated.get('reason', '')})"
+                    ).strip()
+            return "failed", "pod_failed", f"pod {name} failed: {detail}".rstrip(": ")
+        for cs in (status.get("containerStatuses") or []) + (status.get("initContainerStatuses") or []):
+            waiting = (cs.get("state") or {}).get("waiting") or {}
+            if waiting.get("reason") in FATAL_WAITING_REASONS:
+                return (
+                    "failed",
+                    "image_pull" if "Image" in waiting["reason"] else "container_create",
+                    f"pod {name} container {cs.get('name')} {waiting['reason']}: "
+                    f"{waiting.get('message', '')}".rstrip(": "),
+                )
+        if phase == "Pending":
+            for condition in status.get("conditions") or []:
+                if (
+                    condition.get("type") == "PodScheduled"
+                    and condition.get("status") == "False"
+                    and condition.get("reason") == "Unschedulable"
+                ):
+                    created = parse_k8s_timestamp((pod.get("metadata") or {}).get("creationTimestamp"))
+                    age = now - created if created is not None else 0
+                    if age >= PENDING_GRACE_SECONDS:
+                        return (
+                            "failed",
+                            "unschedulable",
+                            f"pod {name} unschedulable for {int(age)}s: {condition.get('message', '')}".rstrip(": "),
+                        )
+
+    if not pods:
+        for event in events:
+            if event.get("reason") == "FailedCreate":
+                return "failed", "failed_create", f"FailedCreate: {event.get('message', '')}".rstrip(": ")
+    return "waiting", None, None
+
+
+def kubectl_json(args):
+    code, out, err = kubectl(args)
+    if code != 0:
+        log(f"warning: kubectl {' '.join(args[:3])} failed: {err.strip()[:200]}")
+        return None
+    try:
+        return json.loads(out or "{}")
+    except ValueError:
+        return None
+
+
+def wait_for_job(namespace, job_name, wait_timeout, poll_interval=POLL_INTERVAL_SECONDS):
+    """Poll until the Job completes; return (reason, detail) on failure, None on success."""
+    started = time.monotonic()
+    last_state = None
+    while True:
+        job = kubectl_json(["get", "job", job_name, "-n", namespace, "-o", "json"])
+        if job is None:
+            job = {}
+        pods = (kubectl_json(["get", "pods", "-n", namespace, "-l", f"job-name={job_name}", "-o", "json"]) or {}).get("items") or []
+        events = []
+        if not pods:
+            events = (
+                kubectl_json([
+                    "get", "events", "-n", namespace, "--field-selector",
+                    f"involvedObject.name={job_name},involvedObject.kind=Job", "-o", "json",
+                ])
+                or {}
+            ).get("items") or []
+        state, reason, detail = classify_job_state(job, pods, events, time.time())
+        if state == "complete":
+            return None
+        if state == "failed":
+            return reason, detail
+        elapsed = time.monotonic() - started
+        snapshot = ", ".join(
+            f"{(p.get('metadata') or {}).get('name')}={(p.get('status') or {}).get('phase')}" for p in pods
+        ) or "no pod yet"
+        if snapshot != last_state:
+            log(f"job {job_name}: {snapshot} ({int(elapsed)}s)")
+            last_state = snapshot
+        if elapsed >= wait_timeout:
+            return "timeout", f"job did not complete within {wait_timeout}s"
+        time.sleep(min(poll_interval, max(wait_timeout - elapsed, 0.1)))
 
 
 def read_digest(namespace, job_name):
@@ -560,11 +901,31 @@ def main():
     parser.add_argument("--timeout", type=int, help=f"build seconds cap (max {MAX_BUILD_SECONDS})")
     parser.add_argument("--render-only", action="store_true",
                         help="print the Job manifest and exit; no kubectl, no tar upload")
+    parser.add_argument("--memory-limit", metavar="Q",
+                        help=f"exact memory limit (default: up to {RESOURCE_DEFAULTS['memory']['limit']}, fitted to quota)")
+    parser.add_argument("--cpu-limit", metavar="Q",
+                        help=f"exact cpu limit (default: up to {RESOURCE_DEFAULTS['cpu']['limit']}, fitted to quota)")
+    parser.add_argument("--ephemeral-limit", metavar="Q",
+                        help=f"exact ephemeral-storage limit (default: up to {RESOURCE_DEFAULTS['ephemeral-storage']['limit']}, fitted to quota)")
     args = parser.parse_args()
 
     image_repo, image_tag = validate_image(args.image)
     for pair in args.build_arg:
         validate_build_arg(pair)
+    overrides = {
+        dimension: value
+        for dimension, value in [
+            ("cpu", args.cpu_limit),
+            ("memory", args.memory_limit),
+            ("ephemeral-storage", args.ephemeral_limit),
+        ]
+        if value
+    }
+    for dimension, value in overrides.items():
+        try:
+            parse_quantity(value, dimension)
+        except ValueError:
+            fail(f"invalid --{dimension.split('-')[0]}-limit quantity: {value}")
 
     workspace = os.environ.get("SEALAI_DEPLOY_WORKSPACE") or os.getcwd()
     runtime_path = args.runtime_file or os.path.join(workspace, ".sealos", "build-runtime.json")
@@ -583,9 +944,10 @@ def main():
 
     if args.render_only:
         posix_dir, bucket, prefix = resolve_context_store(runtime)
+        render_namespace = args.namespace or os.environ.get("SEALAI_NAMESPACE", "ns-example")
         manifest = render_job(
             job_name=job_name,
-            namespace=args.namespace or os.environ.get("SEALAI_NAMESPACE", "ns-example"),
+            namespace=render_namespace,
             service_account=os.environ.get("SERVICE_ACCOUNT_NAME"),
             kaniko_image=args.kaniko_image,
             platform=args.platform,
@@ -610,6 +972,7 @@ def main():
             ),
             build_args=args.build_arg,
             deadline_seconds=deadline_seconds,
+            resources=resolve_resources(render_namespace, overrides, consult_quota=False),
         )
         print(manifest)
         return
@@ -627,6 +990,8 @@ def main():
 
     login, token = check_ghcr_token(args.image)
     log(f"ghcr: authenticated as {login}")
+
+    resources = resolve_resources(namespace, overrides)
 
     s3_endpoint = resolve_job_s3_endpoint(runtime, namespace)
     posix_dir, bucket, prefix = resolve_context_store(runtime)
@@ -656,28 +1021,26 @@ def main():
         s3_env_lines=s3_env_lines,
         build_args=args.build_arg,
         deadline_seconds=deadline_seconds,
+        resources=resources,
     )
     code, _, err = kubectl(["apply", "-f", "-"], input_text=manifest)
     if code != 0:
         fail(f"kubectl apply failed: {err.strip()[:500]}")
-    log(f"job {job_name} created; waiting up to {deadline_seconds + WAIT_SLACK_SECONDS}s")
-
     wait_timeout = deadline_seconds + WAIT_SLACK_SECONDS
-    code, _, err = kubectl(
-        [
-            "wait", "--for=condition=Complete", f"job/{job_name}",
-            "-n", namespace, f"--timeout={wait_timeout}s",
-        ],
-        timeout=wait_timeout + 30,
-    )
-    if code != 0:
+    log(f"job {job_name} created; polling every {POLL_INTERVAL_SECONDS}s, up to {wait_timeout}s")
+
+    failure = wait_for_job(namespace, job_name, wait_timeout)
+    if failure:
+        reason, detail = failure
         diagnostics = collect_failure_diagnostics(namespace, job_name)
         log(diagnostics)
         fail(
-            "kaniko job did not complete",
+            f"kaniko job did not complete ({reason}): {detail}",
             job=job_name,
             namespace=namespace,
-            wait_error=err.strip()[:300],
+            reason=reason,
+            detail=detail[:500],
+            resources={"requests": resources["requests"], "limits": resources["limits"]},
             diagnostics_tail=diagnostics[-1500:],
         )
 

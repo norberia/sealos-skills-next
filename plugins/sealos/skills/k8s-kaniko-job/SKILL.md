@@ -19,7 +19,8 @@ Secrets around it:
 ```bash
 python3 scripts/kaniko-build.py --image ghcr.io/<owner>/<repo>:<tag> \
   [--context <dir>] [--dockerfile <path-relative-to-context>] \
-  [--build-arg KEY=value ...]
+  [--build-arg KEY=value ...] \
+  [--memory-limit <Q>] [--cpu-limit <Q>] [--ephemeral-limit <Q>]
 ```
 
 Resolve `scripts/` against this skill's directory. Run the script from the
@@ -42,6 +43,27 @@ Everything is resolved automatically, in order: CLI flags →
 (`KANIKO_CONTEXT_POSIX_DIR`, `S3_ENDPOINT`, `SEALOS_DEVBOX_JWT_SECRET`, ...) →
 defaults. The Job runs with `backoffLimit: 0`, an active deadline capped at
 1800s, `ttlSecondsAfterFinished: 3600`, and the current ServiceAccount.
+
+### Resources fit the namespace quota
+
+Tenant namespaces carry a `ResourceQuota` (typically `limits.memory: 4Gi`).
+The script reads it and sizes the Job to the remaining quota
+(`hard - used`, tightest quota wins) — never above the defaults
+(limits `cpu 2 / memory 8Gi / ephemeral-storage 10Gi`, requests
+`500m / 2Gi / 2Gi`) and never below the floors (limits `500m / 1Gi / 2Gi`).
+The chosen values are logged (`resources: requests {...} limits {...}`).
+Do not pre-check or hand-edit the Job for quota; rerun with a flag instead:
+
+- `--memory-limit`, `--cpu-limit`, `--ephemeral-limit` set an exact limit
+  (any Kubernetes quantity). An explicit value is used verbatim; if it does
+  not fit the quota the script fails instead of shrinking it.
+- If even the floor does not fit, the script fails before creating anything:
+  `{"success": false, "error": "namespace quota cannot fit the kaniko job:
+  limits.memory remaining 512Mi < floor 1Gi", "quota": {"limits.memory":
+  {"hard": "4Gi", "used": "3584Mi", "remaining": "512Mi", ...}}}` — free
+  quota (scale down or delete workloads) or pass a smaller `--memory-limit`.
+- `--render-only` applies the flags and defaults but does not consult the
+  cluster.
 
 ## Preconditions
 
@@ -81,11 +103,22 @@ termination message lost), fall back to the tag reference in `image`.
 
 ## Failure triage
 
-The script prints Job status, pod state, and the Kaniko log tail on failure.
+The script polls the Job every 5s and fails fast — instead of waiting out the
+build deadline — when the Job has a `FailedCreate` event, a pod stays
+`Unschedulable` for 90s, the kaniko container hits
+`ErrImagePull`/`ImagePullBackOff`/`CreateContainerError`, the pod fails, or the
+Job condition turns `Failed`. The failure JSON carries a stable `reason`
+(`failed_create`, `unschedulable`, `image_pull`, `container_create`,
+`pod_failed`, `job_failed`, `timeout`), the cluster message in `detail`, the
+`resources` used, and a `diagnostics_tail` with Job status, pod state, events,
+and the Kaniko log tail. Do not retry the same command on a fail-fast error;
+fix the cause named by `reason`/`detail` first.
 
 | Symptom | Cause → fix |
 |---|---|
-| Job pod `ImagePullBackOff` on the executor image | cluster cannot pull `gcr.io/kaniko-project/executor` → report; there is no local fallback |
+| `reason: failed_create`, `exceeded quota` in `detail` | quota changed between fitting and admission (another pod was created concurrently) → rerun; if it persists, free quota or pass a smaller `--memory-limit` |
+| `reason: image_pull` on the executor image | cluster cannot pull `gcr.io/kaniko-project/executor` → report; there is no local fallback |
+| `reason: pod_failed`/`job_failed` with kaniko log `UNAUTHORIZED` on the `FROM` image | private base image the Job cannot pull → use a public base image or report; the Job only carries the GHCR credentials of the token login |
 | Kaniko log: `error uploading context` / S3 connection refused | the Job cannot reach the VersityGW endpoint → check `.sealos/build-runtime.json.s3Endpoint`; never point the Job at 127.0.0.1 |
 | Kaniko log: `401/403` on push | token scope or owner mismatch → the script's preflight output shows the authenticated login |
 | Dockerfile build error | fix the Dockerfile in the workspace and rerun; each run creates a fresh Job |
