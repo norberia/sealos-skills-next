@@ -1,7 +1,7 @@
 # Brain × sealos-skills-next 适配
 
-状态：**已实施**（本仓库侧全部落地；待 Brain 环境实跑验收）。
-日期：2026-08-20。
+状态：**已实施**（本仓库侧全部落地，含 2026-09-04 Devbox 沙箱环境修正；待 Brain 环境实跑验收）。
+日期：2026-08-20（2026-09-04 依据 Langfuse 实跑会话修订 §3/§5/§6/§7）。
 范围：Brain GitHub deploy（Devbox + Agent）如何驱动本仓库的 skill 完成部署。
 
 **硬约束：只能改 sealos-skills-next，Brain 一行代码不动。** 因此 Brain 里所有
@@ -70,9 +70,11 @@ Devbox 创建时一次性注入（resume 不重注）：
 | `SEALAI_DEPLOY_TASK_ID` / `SEALAI_PROJECT_ID` | 任务/项目 id |
 | `SEALAI_NAMESPACE` / `SEALAI_DEPLOY_NAMESPACE` | 目标命名空间 |
 | `SEALAI_DEPLOY_WORKSPACE` | `/home/devbox/project` |
-| `KUBECONFIG` / `SEALAI_KUBECONFIG_PATH` | `/home/devbox/.kube/config`（Devbox 平台写入，edit 角色） |
+| `KUBECONFIG` / `SEALAI_KUBECONFIG_PATH` | `/var/run/sealos/kubeconfig/config`（Devbox 平台写入，edit 角色）。**in-cluster 形态**：`server: https://kubernetes.default.svc`，`certificate-authority: /var/run/sealos/kube-api-access/ca.crt`，`tokenFile: /var/run/sealos/kube-api-access/token`，context 里带 `namespace: ns-xxxx`。`kubectl` 原样可用；Template API 不能吃文件路径（此前 HTTP 500 `KUBERNETES_ERROR ... ENOENT ca.crt`），`sealos-api.py` 每次调用时把 CA/token 内联成 `certificate-authority-data` + `token`（不落盘、不打印） |
+| `SEALOS_REGION` | **Brain 需注入**（region URL 如 `https://usw-1.sealos.io`，或裸 host）。kubeconfig server 是 in-cluster 地址，推不出 region；缺失时 `sealos-api.py` 报错要求设置。可选 `SEALAI_TEMPLATE_API_URL` 直接给 Template API 完整 base URL 覆盖 |
 | `SEALAI_INPUTS_PATH` | `/run/sealai/deployment/inputs.json`（flat string map，0600） |
-| `SEALAI_DEPLOY_LABELS_JSON` | `{"brain.io/managed-by","brain.io/project-id","brain.io/deployment-kind"}` — 无 task-id、无 deployment-name |
+| `SEALAI_DEPLOY_LABELS_PATH` | `/run/sealai/deployment/labels.json`（**Brain 并行修改中**）：ownership labels 以 JSON 对象落文件，规避 env 引号剥离；skill 优先读它 |
+| `SEALAI_DEPLOY_LABELS_JSON` | `brain.io/managed-by` / `brain.io/project-id` / `brain.io/deployment-kind` 三键 — 无 task-id、无 deployment-name。**注意**：Devbox 平台会剥掉 env 值里的引号，实到形如 `{brain.io/managed-by:brain,brain.io/project-id:...,brain.io/deployment-kind:template}`（非合法 JSON）；`sealos-api.py` 严格 JSON 失败后按 `{k:v,k:v}` 宽容解析，作为 `SEALAI_DEPLOY_LABELS_PATH` 的兜底 |
 | `SEALAI_TURN_DEADLINE_AT` | 总 70 分钟截止（创建时定格） |
 | `SEALAI_DEPLOY_MCP_TOKEN` | MCP bearer（禁止打印） |
 | `GITHUB_TOKEN` | GitHub 源注入；克隆 + GHCR 推送用 |
@@ -152,7 +154,7 @@ Devbox 运行时（labring-actions/devbox-runtime sandbox/v1）自带 VersityGW�
 | `plugins/sealos/skills/k8s-kaniko-job/SKILL.md` | **新建**。构建执行器说明：机制、前置条件、结果读取（digest 钉扎、pull 分类与 pull secret）、失败分诊表 |
 | `plugins/sealos/skills/k8s-kaniko-job/scripts/kaniko-build.py` | **新建**，stdlib-only 单脚本：解析 build-runtime.json + 运行时 env → 校验 GHCR token（write:packages、owner=login）→ tar 上下文进 VersityGW POSIX 目录 → 现场造 registry secret（S3 凭证优先直接引用 Brain 给的 devbox secret，不落盘）→ 渲染并 apply Kaniko Job（`--digest-file=/dev/termination-log`、backoffLimit 0、deadline ≤1800s 且尊重 Brain 截止时间、ttl 3600）→ wait → 从 termination message 取 digest → 匿名拉取分类 → 输出 JSON。支持 `--render-only` 离线验证 |
 | `plugins/sealos/skills/use-sealos/SKILL.md` | Preflight 最前加 managed 门（转 `../sealos-deploy/SKILL.md`）+ Routing 一行 |
-| `plugins/sealos/skills/use-sealos/scripts/sealos-api.py` | ① `deploy` 请求体可选 `extraLabels`（`--labels-json` 或 `SEALAI_DEPLOY_LABELS_JSON`，无则省略字段）② kubeconfig 解析：`SEALOS_KUBECONFIG` > 已存在的 `~/.sealos/kubeconfig` > 已存在的环境 `KUBECONFIG`；`login`/`switch` 永不写环境 `KUBECONFIG` ③ 新增 `store-export <template> --out F`：把 store 模板源（Template CR + 资源）落成单文件并输出 sha256——managed 下 store 路径由此物化到固定路径再走 raw deploy（`deploy-store` 在 managed 下禁用：无法带 extraLabels、无本地字节可哈希） |
+| `plugins/sealos/skills/use-sealos/scripts/sealos-api.py` | ① `deploy` 请求体可选 `extraLabels`（`--labels-json` 或 `SEALAI_DEPLOY_LABELS_JSON`，无则省略字段）② kubeconfig 解析：`SEALOS_KUBECONFIG` > 已存在的 `~/.sealos/kubeconfig` > 已存在的环境 `KUBECONFIG`；`login`/`switch` 永不写环境 `KUBECONFIG` ③ 新增 `store-export <template> --out F`：把 store 模板源（Template CR + 资源）落成单文件并输出 sha256——managed 下 store 路径由此物化到固定路径再走 raw deploy（`deploy-store` 在 managed 下禁用：无法带 extraLabels、无本地字节可哈希）④ region 解析优先级：`SEALAI_TEMPLATE_API_URL`（设了则所有 Template API 调用直接用它）> `SEALOS_REGION`（region URL 或裸 host）> `~/.sealos/auth.json` 的 region > kubeconfig server host；server 为 in-cluster 地址（`kubernetes.default.svc` 等）时拒绝并提示设置 `SEALOS_REGION` ⑤ 每次 Template API 调用前把 `tokenFile`/`certificate-authority` 文件内联成自包含 kubeconfig（`certificate-authority-data` + `token`），仅存在内存中，不落盘不打印 ⑥ `deploy` 的 labels 优先级：`--labels-json` > `SEALAI_DEPLOY_LABELS_PATH` 文件 > `SEALAI_DEPLOY_LABELS_JSON` 严格 JSON > 引号被剥后的 `{k:v,k:v}` 宽容解析；skill 本身不改写、不重推 labels ⑦ `status` 识别 `tokenFile` kubeconfig 为 `authenticated: true`，并输出 `region_domain`（未设 `SEALOS_REGION` 时为 null）、`template_api`、`credential_files_inlined` |
 | `skills/{sealos-deploy,k8s-kaniko-job}` | 新 symlink |
 | `README.md` | 目录树、skills.sh 三技能说明、Brain 一节 |
 | `test-host-coverage.js` | 新增 Brain pack 测试：两个 marker 目录名、symlink 指向、SKILL.md 合同要素、use-sealos 的门 |
@@ -188,6 +190,10 @@ Devbox 运行时（labring-actions/devbox-runtime sandbox/v1）自带 VersityGW�
    两个 python 脚本 `py_compile` 通过；本地 use-sealos 行为不变
   （无 managed 变量时门不触发，kubeconfig 解析在 `~/.sealos/kubeconfig`
    存在时与旧行为逐字节一致）。
+7. 新增单测 `use-sealos/scripts/test_sealos_api_env.py`：覆盖 region 解析
+   优先级（含 in-cluster host 拒绝）、Template API 调用前的 kubeconfig 内联、
+   labels 优先级与引号剥离兜底解析。三处故障（ENOENT ca.crt / region 推导失败 /
+   labels 非法 JSON）均来自 Brain managed 实跑的 Langfuse 会话，已按上表修正。
 
 ## 7. 待线上验收（无法离线证明）
 
@@ -198,6 +204,9 @@ Devbox 运行时（labring-actions/devbox-runtime sandbox/v1）自带 VersityGW�
 4. `publicUrl` 域名与 `AP_USER_DOMAIN` 的匹配情况——skill 已内置退让：Brain
    报域外/不可达而 workload 健康时，重报一次不带 `publicUrl`。
 5. 生产 `DEPLOY_SKILL_SOURCE` 何时从 `labring/sealos-skills#main` 切换。
+6. Brain 侧注入 `SEALOS_REGION`（或 `SEALAI_TEMPLATE_API_URL`）并落
+   `/run/sealai/deployment/labels.json` + `SEALAI_DEPLOY_LABELS_PATH` 后，
+   再跑一次 Langfuse 里失败的三条链路复核（当前脚本侧修正已离线验证）。
 
 ---
 

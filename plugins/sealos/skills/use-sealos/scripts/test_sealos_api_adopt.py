@@ -55,7 +55,7 @@ class AdoptTests(unittest.TestCase):
         self.sleep = self.sleep_patch.start()
         self.kc_patch = patch.object(api, "load_kubeconfig", return_value="apiVersion: v1")
         self.kc_patch.start()
-        self.domain_patch = patch.object(api, "region_domain", return_value="usw-1.sealos.io")
+        self.domain_patch = patch.object(api, "resolve_region_domain", return_value="usw-1.sealos.io")
         self.domain_patch.start()
 
     def tearDown(self):
@@ -93,7 +93,7 @@ class AdoptTests(unittest.TestCase):
 
     def test_skip_when_region_is_sealos_run(self):
         self.domain_patch.stop()
-        self.domain_patch = patch.object(api, "region_domain", return_value="gzg.sealos.run")
+        self.domain_patch = patch.object(api, "resolve_region_domain", return_value="gzg.sealos.run")
         self.domain_patch.start()
         http = FakeHttp([])
         result = self._adopt(http=http)
@@ -105,7 +105,7 @@ class AdoptTests(unittest.TestCase):
     def test_skip_sealos_run_even_when_managed_env_set(self):
         os.environ["SEALAI_PROJECT_ID"] = "proj-1"
         self.domain_patch.stop()
-        self.domain_patch = patch.object(api, "region_domain", return_value="bja.sealos.run")
+        self.domain_patch = patch.object(api, "resolve_region_domain", return_value="bja.sealos.run")
         self.domain_patch.start()
         http = FakeHttp([])
         result = self._adopt(http=http)
@@ -265,7 +265,7 @@ class AdoptTests(unittest.TestCase):
 
     def test_deploy_skip_sealos_run_does_not_call_brain(self):
         self.domain_patch.stop()
-        self.domain_patch = patch.object(api, "region_domain", return_value="hzh.sealos.run")
+        self.domain_patch = patch.object(api, "resolve_region_domain", return_value="hzh.sealos.run")
         self.domain_patch.start()
         http = FakeHttp([(201, {"name": "demo-abc"})])
         with tempfile.TemporaryDirectory() as tmp:
@@ -290,7 +290,7 @@ class AdoptTests(unittest.TestCase):
 
     def test_adopt_subcommand_zero_on_sealos_run(self):
         self.domain_patch.stop()
-        self.domain_patch = patch.object(api, "region_domain", return_value="gzg.sealos.run")
+        self.domain_patch = patch.object(api, "resolve_region_domain", return_value="gzg.sealos.run")
         self.domain_patch.start()
         http = FakeHttp([])
         args = argparse.Namespace(instance="foo", template_name=None)
